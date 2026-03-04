@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import KPISection from './components/KPISection';
-import TrafficMap2D from './components/TrafficMap2D';
+import CityMap from './components/CityMap';
 import AIDecisionPanel from './components/AIDecisionPanel';
 import SignalControlPanel from './components/SignalControlPanel';
 import EmergencyCard from './components/EmergencyCard';
@@ -38,7 +38,7 @@ const App: React.FC = () => {
       headers: { 'Content-Type': 'application/json' }
     }).catch(e => console.error(`Failed to ${endpoint} emergency`, e));
   };
-  
+
   // Multi-Intersection Simulation State (5x5 Grid - 25 intersections)
   // Matching the image: 5 roads horizontal, 5 roads vertical = 25 intersections
   const [intersections, setIntersections] = useState<IntersectionStatus[]>([]);
@@ -53,7 +53,34 @@ const App: React.FC = () => {
         const response = await fetch('http://localhost:8001/api/grid/state');
         if (!response.ok) return;
         const data = await response.json();
-        if (data.intersections) setIntersections(data.intersections);
+
+        // Enrich intersections with coordinates and density
+        const centerLat = 28.6327;
+        const centerLng = 77.2197;
+        const spacing = 0.003;
+
+        const enrichedIntersections = (data.intersections || []).map((inter: any, idx: number) => {
+          const row = Math.floor(idx / 5);
+          const col = idx % 5;
+
+          // Calculate vehicle density for this intersection
+          // Sum of vehicles within proximity or just assigned to this node
+          const vehicleCount = (data.vehicles || []).filter((v: any) => v.laneId.includes(String(row)) || v.laneId.includes(String(col))).length;
+          const density = Math.min(vehicleCount / 10, 1);
+
+          return {
+            ...inter,
+            lat: centerLat + (row - 2) * spacing,
+            lng: centerLng + (col - 2) * spacing,
+            density: density,
+            aiPrediction: {
+              congestionLevel: density > 0.7 ? 'CRITICAL' : density > 0.4 ? 'MODERATE' : 'STABLE',
+              flowImprovement: density > 0.5 ? '+14%' : 'N/A'
+            }
+          };
+        });
+
+        setIntersections(enrichedIntersections);
         if (data.vehicles) setVehicles(data.vehicles);
       } catch (error) {
         console.error("Failed to fetch grid state:", error);
@@ -65,38 +92,38 @@ const App: React.FC = () => {
         const response = await fetch('http://localhost:8001/api/emergency/state');
         if (!response.ok) return;
         const data = await response.json();
-        
-        if (data.emergency && data.emergency.active) {
-            // New valid active data: clear any pending timeout
-            if (emergencyTimeoutRef.current) {
-                clearTimeout(emergencyTimeoutRef.current);
-                emergencyTimeoutRef.current = null;
-            }
 
-            setEmergencyActive(data.emergency.active);
-            setEmergencyVehicle({
-                id: 'EMG-1',
-                laneId: data.emergency.laneId,
-                position: data.emergency.position,
-                speed: data.emergency.speed,
-                type: 'emergency',
-                active: data.emergency.active
-            });
+        if (data.emergency && data.emergency.active) {
+          // New valid active data: clear any pending timeout
+          if (emergencyTimeoutRef.current) {
+            clearTimeout(emergencyTimeoutRef.current);
+            emergencyTimeoutRef.current = null;
+          }
+
+          setEmergencyActive(data.emergency.active);
+          setEmergencyVehicle({
+            id: 'EMG-1',
+            laneId: data.emergency.laneId,
+            position: data.emergency.position,
+            speed: data.emergency.speed,
+            type: 'emergency',
+            active: data.emergency.active
+          });
         } else {
-             setEmergencyActive(false);
-             
-             // If we currently have a vehicle and no timeout is active, start persistence timer
-             // We can't check 'emergencyVehicle' state directly here due to closure staleness,
-             // so we rely on the fact that if we had one, the user sees it, and we want to keep it.
-             // But simpler: just set the timeout. If it was already null, setting it to null again in 2s is fine.
-             // Crucially, we do NOT set it to null immediately here.
-             
-             if (!emergencyTimeoutRef.current) {
-                 emergencyTimeoutRef.current = setTimeout(() => {
-                     setEmergencyVehicle(null);
-                     emergencyTimeoutRef.current = null;
-                 }, 2000);
-             }
+          setEmergencyActive(false);
+
+          // If we currently have a vehicle and no timeout is active, start persistence timer
+          // We can't check 'emergencyVehicle' state directly here due to closure staleness,
+          // so we rely on the fact that if we had one, the user sees it, and we want to keep it.
+          // But simpler: just set the timeout. If it was already null, setting it to null again in 2s is fine.
+          // Crucially, we do NOT set it to null immediately here.
+
+          if (!emergencyTimeoutRef.current) {
+            emergencyTimeoutRef.current = setTimeout(() => {
+              setEmergencyVehicle(null);
+              emergencyTimeoutRef.current = null;
+            }, 2000);
+          }
         }
       } catch (error) {
         console.error("Failed to fetch emergency state:", error);
@@ -106,7 +133,7 @@ const App: React.FC = () => {
     // Optimization: Reduce polling to 100ms (10Hz) which is sufficient for UI
     const interval = setInterval(fetchGridState, 100);
     const emergencyInterval = setInterval(fetchEmergencyState, 200); // 5Hz for emergency is fine
-    
+
     fetchGridState(); // Initial fetch
     fetchEmergencyState();
 
@@ -153,16 +180,16 @@ const App: React.FC = () => {
                     <span className="text-xs font-bold tracking-widest text-blue-400 uppercase">Urban Grid Logic (5x5)</span>
                     <h2 className="text-xl font-bold">SignalIQ Central Command</h2>
                   </div>
-                  
+
                   <div className="absolute top-4 right-4 z-20 flex gap-2">
-                     <div className="bg-black/60 px-3 py-1.5 rounded-full border border-slate-700 flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full animate-pulse ${isEmergencyActive ? 'bg-red-500' : 'bg-green-500'}`} />
-                        <span className="text-xs font-mono uppercase tracking-tighter">System: {isEmergencyActive ? 'Critical' : 'Nominal'}</span>
-                      </div>
+                    <div className="bg-black/60 px-3 py-1.5 rounded-full border border-slate-700 flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full animate-pulse ${isEmergencyActive ? 'bg-red-500' : 'bg-green-500'}`} />
+                      <span className="text-xs font-mono uppercase tracking-tighter">System: {isEmergencyActive ? 'Critical' : 'Nominal'}</span>
+                    </div>
                   </div>
-                  
-                  <TrafficMap2D intersections={intersections} vehicles={vehicles} emergencyActive={isEmergencyActive} emergencyVehicle={emergencyVehicle} onIntersectionClick={setSelectedIntersectionId} />
-                  
+
+                  <CityMap intersections={intersections} vehicles={vehicles} emergencyActive={isEmergencyActive} emergencyVehicle={emergencyVehicle} onIntersectionClick={setSelectedIntersectionId} />
+
                   <div className="absolute bottom-4 left-4 z-20 flex gap-4 bg-black/40 backdrop-blur-sm p-3 rounded-xl border border-white/5">
                     <div className="flex items-center gap-2">
                       <div className="w-3 h-3 bg-emerald-500 rounded-full" />

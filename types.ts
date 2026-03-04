@@ -21,9 +21,16 @@ export interface SignalStatus {
 
 export interface IntersectionStatus {
   id: string;
+  lat: number;
+  lng: number;
   nsSignal: SignalState;
   ewSignal: SignalState;
   timer: number;
+  density: number; // 0.0 - 1.0 based on vehicle count
+  aiPrediction: {
+    congestionLevel: string;
+    flowImprovement: string;
+  };
 }
 
 export interface EmergencyVehicle {
