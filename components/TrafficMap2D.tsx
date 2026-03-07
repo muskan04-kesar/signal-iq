@@ -24,17 +24,28 @@ const TrafficMap2D: React.FC<TrafficMap2DProps> = ({ intersections, vehicles = [
     pollInterval: 50
   });
 
-  // Grid constants: 5 roads = 4 blocks = 25 intersections
-  const roadWidth = 50;
-  const lanePadding = 10;
+  const coordinateExtents = useMemo(() => {
+    if (intersections.length === 0) return { minLat: 0, maxLat: 1, minLng: 0, maxLng: 1 };
+    const lats = intersections.map(i => i.lat);
+    const lngs = intersections.map(i => i.lng);
+    return {
+      minLat: Math.min(...lats),
+      maxLat: Math.max(...lats),
+      minLng: Math.min(...lngs),
+      maxLng: Math.max(...lngs)
+    };
+  }, [intersections]);
 
-  const grid = useMemo(() => {
-    if (dimensions.width === 0) return { h: [], v: [] };
-    // Evenly spaced 5 roads
-    const h = [0.15, 0.32, 0.49, 0.66, 0.83].map(p => dimensions.height * p);
-    const v = [0.15, 0.32, 0.49, 0.66, 0.83].map(p => dimensions.width * p);
-    return { h, v };
-  }, [dimensions]);
+  const getXY = (lat: number, lng: number) => {
+    const { minLat, maxLat, minLng, maxLng } = coordinateExtents;
+    const padding = 50;
+    const usableW = Math.max(dimensions.width - padding * 2, 1);
+    const usableH = Math.max(dimensions.height - padding * 2, 1);
+    const x = padding + ((lng - minLng) / (maxLng - minLng || 1)) * usableW;
+    // Lat increases upwards, Canvas y goes downwards
+    const y = dimensions.height - (padding + ((lat - minLat) / (maxLat - minLat || 1)) * usableH);
+    return { x, y };
+  };
 
   const getVehicleLength = (type: VehicleType) => {
     switch (type) {
@@ -69,31 +80,13 @@ const TrafficMap2D: React.FC<TrafficMap2DProps> = ({ intersections, vehicles = [
       {dimensions.width > 0 && (
         <Stage width={dimensions.width} height={dimensions.height}>
           <Layer>
-            {/* 5x5 Grid Road Backgrounds */}
-            {grid.h.map((y, idx) => (
-              <Group key={`h-road-${idx}`}>
-                {/* <Rect x={0} y={y - roadWidth / 2} width={dimensions.width} height={roadWidth} fill="#111827" /> */}
-                <Line points={[0, y, dimensions.width, y]} stroke="#334155" strokeWidth={1} dash={[4, 4]} opacity={0.6} />
-              </Group>
-            ))}
-            {grid.v.map((x, idx) => (
-              <Group key={`v-road-${idx}`}>
-                {/* <Rect x={x - roadWidth / 2} y={0} width={roadWidth} height={dimensions.height} fill="#111827" /> */}
-                <Line points={[x, 0, x, dimensions.height]} stroke="#334155" strokeWidth={1} dash={[4, 4]} opacity={0.6} />
-              </Group>
-            ))}
-
             {/* Intersections and Signals */}
             {intersections.map((inter, i) => {
-              const row = Math.floor(i / 5);
-              const col = i % 5;
-              const x = grid.v[col];
-              const y = grid.h[row];
-
+              const { x, y } = getXY(inter.lat, inter.lng);
+              const roadWidth = 50; // Fallback size for visualization
+              
               return (
                 <Group key={inter.id} onClick={() => onIntersectionClick(inter.id)} cursor="pointer">
-                  {/* Visual intersection hub - Removed for transparency */}
-
                   {/* Dynamic Signal Bulbs */}
                   {/* Vertical Direction Signals */}
                   <Circle x={x} y={y - roadWidth / 2 - 5} radius={4.5} fill={inter.nsSignal === 'GREEN' ? '#10b981' : '#ef4444'} shadowBlur={inter.nsSignal === 'GREEN' ? 12 : 5} shadowColor={inter.nsSignal === 'GREEN' ? '#10b981' : '#ef4444'} />
@@ -103,23 +96,24 @@ const TrafficMap2D: React.FC<TrafficMap2DProps> = ({ intersections, vehicles = [
                   <Circle x={x - roadWidth / 2 - 5} y={y} radius={4.5} fill={inter.ewSignal === 'GREEN' ? '#10b981' : '#ef4444'} shadowBlur={inter.ewSignal === 'GREEN' ? 12 : 5} shadowColor={inter.ewSignal === 'GREEN' ? '#10b981' : '#ef4444'} />
                   <Circle x={x + roadWidth / 2 + 5} y={y} radius={4.5} fill={inter.ewSignal === 'GREEN' ? '#10b981' : '#ef4444'} shadowBlur={inter.ewSignal === 'GREEN' ? 12 : 5} shadowColor={inter.ewSignal === 'GREEN' ? '#10b981' : '#ef4444'} />
 
-                  <Text x={x - 12} y={y - 6} text={inter.id.split('-')[1]} fill="#cbd5e1" fontSize={12} opacity={0.8} fontStyle="bold" />
+                  <Text x={x - 12} y={y - 6} text={inter.type || 'JCT'} fill="#cbd5e1" fontSize={10} opacity={0.8} fontStyle="bold" />
                 </Group>
               );
             })}
 
-            {/* Vehicle Layer */}
+            {/* Vehicle Layer Map (Simplified for non-grid) */}
             {displayVehicles.map(v => {
               let vx = 0, vy = 0, rot = 0;
               const roadIdx = parseInt(v.laneId.match(/\d+/)?.[0] || '0');
+              const lanePadding = 10;
 
               if (v.laneType === 'horizontal') {
                 vx = v.position;
-                const roadY = grid.h[roadIdx];
+                const roadY = dimensions.height * (0.15 + (roadIdx % 5) * 0.17);
                 vy = v.direction === 'east' ? roadY + lanePadding : roadY - lanePadding;
               } else {
                 vy = v.position;
-                const roadX = grid.v[roadIdx];
+                const roadX = dimensions.width * (0.15 + (roadIdx % 5) * 0.17);
                 vx = v.direction === 'south' ? roadX - lanePadding : roadX + lanePadding;
               }
 
@@ -228,12 +222,12 @@ const TrafficMap2D: React.FC<TrafficMap2DProps> = ({ intersections, vehicles = [
 
               if (emergencyVehicle.laneId.startsWith('H')) {
                 vx = emergencyVehicle.position;
-                const roadY = grid.h[roadIdx];
-                vy = roadY + lanePadding;
+                const roadY = dimensions.height * (0.15 + (roadIdx % 5) * 0.17);
+                vy = roadY + 10;
               } else {
                 vy = emergencyVehicle.position;
-                const roadX = grid.v[roadIdx];
-                vx = roadX - lanePadding;
+                const roadX = dimensions.width * (0.15 + (roadIdx % 5) * 0.17);
+                vx = roadX - 10;
               }
 
               // Match global rotation logic

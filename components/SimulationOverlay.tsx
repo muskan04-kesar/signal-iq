@@ -49,20 +49,22 @@ export const SimulationOverlay: React.FC<SimulationOverlayProps> = ({ intersecti
     const vehiclesRef = useRef<RoundaboutVehicle[]>([]);
 
     const signalTimerRef = useRef<number>(0);
-    const [osmData, setOsmData] = useState<Record<string, { snapCenter: { lat: number, lng: number }, arms: { path: { lat: number, lng: number }[], angle: number, length: number }[] }>>({});
-
-    const ROUNDABOUT_LAT = 25.473034;
-    const ROUNDABOUT_LNG = 81.878357;
-
     const getRoadData = (inter: IntersectionStatus) => {
-        if (osmData[inter.id] && osmData[inter.id].arms.length > 0) {
-            return osmData[inter.id];
+        const isRoundabout = inter.type === 'ROUNDABOUT';
+        let armAngles = [0, 90, 180, 270]; // Default FOUR_WAY
+        if (inter.armAngles && inter.armAngles.length > 0) {
+            armAngles = inter.armAngles;
+        } else if (isRoundabout) {
+            armAngles = [0, 60, 120, 180, 240, 300];
+        } else if (inter.type === 'T') {
+            armAngles = [0, 90, 180];
+        } else if (inter.type === 'COMPLEX') {
+            armAngles = [0, 72, 144, 216, 288];
         }
 
-        const isRoundabout = Math.abs(inter.lat - ROUNDABOUT_LAT) < 0.0001 && Math.abs(inter.lng - ROUNDABOUT_LNG) < 0.0001;
-        const arms = (isRoundabout ? [0, 60, 120, 180, 240, 300] : [0, 90, 180, 270]).map(angle => ({
+        const arms = armAngles.map(angle => ({
             angle: (angle - 90) * (Math.PI / 180),
-            length: 120,
+            length: 50,
             path: [] as { lat: number, lng: number }[]
         }));
 
@@ -115,118 +117,9 @@ export const SimulationOverlay: React.FC<SimulationOverlayProps> = ({ intersecti
         resize: resizeCanvas
     });
 
+    // OSM Fetching removed to prevent 429 Rate Limits
     useEffect(() => {
-        if (!intersections.length) return;
-        let isMounted = true;
-
-        const fetchOsm = async () => {
-            try {
-                // Determine bounding box around all intersections, or simply bundle around-queries.
-                // We'll bundle ways around each intersection. Max queries limited to avoid too long requests.
-                const validIntersections = intersections.slice(0, 50); // cap length for safety
-                if (validIntersections.length === 0) return;
-
-                let queryBody = validIntersections.map(inter =>
-                    `way(around:120,${inter.lat},${inter.lng})[highway~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|service)$"];`
-                ).join('');
-
-                const query = `[out:json];(${queryBody});out geom;`;
-
-                const response = await fetch('https://overpass-api.de/api/interpreter', {
-                    method: 'POST',
-                    body: query
-                });
-
-                const data = await response.json();
-                console.log("Overpass response:", data);
-
-                const newOsmData: Record<string, any> = {};
-
-                validIntersections.forEach(inter => {
-                    const arms: any[] = [];
-                    let snapCenter = { lat: inter.lat, lng: inter.lng };
-                    let globalMinD = Infinity;
-
-                    data.elements?.forEach((way: any) => {
-                        let minD = Infinity;
-                        let minIdx = -1;
-                        if (!way.geometry) return;
-
-                        way.geometry.forEach((geom: any, idx: number) => {
-                            const d = distHaversine(inter.lat, inter.lng, geom.lat, geom.lon);
-                            if (d < minD) { minD = d; minIdx = idx; }
-                            if (d < globalMinD) { globalMinD = d; snapCenter = { lat: geom.lat, lng: geom.lon }; }
-                        });
-
-                        // If way connects relatively close to intersection center (tolerance 50m)
-                        if (minD < 50) {
-                            const makePath = (step: number) => {
-                                const path = [];
-                                let currDist = 0;
-                                let currIdx = minIdx;
-                                while (currIdx >= 0 && currIdx < way.geometry.length) {
-                                    const pt = way.geometry[currIdx];
-                                    path.push({ lat: pt.lat, lng: pt.lon });
-                                    currDist = distHaversine(inter.lat, inter.lng, pt.lat, pt.lon);
-                                    if (currDist > 150) break; // Extract up to 150m
-                                    currIdx += step;
-                                }
-                                return path;
-                            };
-
-                            if (minIdx > 0 || (way.nodes && way.nodes[0] === way.nodes[way.nodes.length - 1])) {
-                                const path = makePath(-1);
-                                if (path.length > 1) {
-                                    let farNode = path[path.length - 1];
-                                    for (let i = 0; i < path.length; i++) {
-                                        if (distHaversine(path[0].lat, path[0].lng, path[i].lat, path[i].lng) > 15) { farNode = path[i]; break; }
-                                    }
-                                    arms.push({ path, bearing: getBearing(path[0].lat, path[0].lng, farNode.lat, farNode.lng) });
-                                }
-                            }
-                            if (minIdx < way.geometry.length - 1 || (way.nodes && way.nodes[0] === way.nodes[way.nodes.length - 1])) {
-                                const path = makePath(1);
-                                if (path.length > 1) {
-                                    let farNode = path[path.length - 1];
-                                    for (let i = 0; i < path.length; i++) {
-                                        if (distHaversine(path[0].lat, path[0].lng, path[i].lat, path[i].lng) > 15) { farNode = path[i]; break; }
-                                    }
-                                    arms.push({ path, bearing: getBearing(path[0].lat, path[0].lng, farNode.lat, farNode.lng) });
-                                }
-                            }
-                        }
-                    });
-
-                    if (arms.length > 0) {
-                        // Filter duplicates (roads within 20 degrees are likely the same)
-                        const uniqueArms: any[] = [];
-                        arms.forEach(a => {
-                            if (!uniqueArms.some(ua => Math.abs(ua.bearing - a.bearing) < 20 || Math.abs(ua.bearing - a.bearing) > 340)) {
-                                uniqueArms.push({
-                                    path: a.path,
-                                    angle: (a.bearing - 90) * (Math.PI / 180),
-                                    length: 120
-                                });
-                            }
-                        });
-
-                        newOsmData[inter.id] = { snapCenter, arms: uniqueArms };
-                    }
-                });
-
-                if (isMounted) {
-                    setOsmData(prev => {
-                        const next = { ...prev, ...newOsmData };
-                        return next;
-                    });
-                }
-            } catch (err) {
-                console.error("OSM Fetch error", err);
-            }
-        };
-        fetchOsm();
-
-        return () => { isMounted = false; };
+        // We now rely purely on real intersection coordinates passed via props
     }, [intersections]);
 
     useEffect(() => {
@@ -247,24 +140,10 @@ export const SimulationOverlay: React.FC<SimulationOverlayProps> = ({ intersecti
 
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             const scale = Math.pow(2, zoom - 17);
-            const circleRadius = 60 * scale;
+            const circleRadius = 18 * scale;
             const isHighZoom = zoom >= 17;
 
-            // --- 1. Map Mask Layer (Fade background tiles) ---
-            if (isHighZoom && intersections.length > 0) {
-                const targetInter = intersections.find(i => i.id === selectedIntersectionId) || intersections[0];
-                const { snapCenter } = getRoadData(targetInter);
-                const cp = map.latLngToContainerPoint(snapCenter);
-
-                const maxDim = Math.max(canvas.width, canvas.height);
-                const maskGrad = ctx.createRadialGradient(cp.x, cp.y, circleRadius, cp.x, cp.y, maxDim * 0.7);
-                maskGrad.addColorStop(0, 'rgba(0,0,0,0)');
-                maskGrad.addColorStop(0.3, 'rgba(0,0,0,0.5)');
-                maskGrad.addColorStop(1, 'rgba(0,0,0,0.8)');
-
-                ctx.fillStyle = maskGrad;
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-            }
+            // --- 1. Map Mask Layer (Fade background tiles) removed per user request to preserve map brightness ---
 
             // --- 2. Signal Logic ---
             signalTimerRef.current += 1;
@@ -285,7 +164,7 @@ export const SimulationOverlay: React.FC<SimulationOverlayProps> = ({ intersecti
 
                 const roadColor = isHighZoom ? '#3a3f45' : '#2c2f33';
                 const markingColor = '#e0e0e0';
-                const roadWidth = 28 * scale;
+                const roadWidth = 14 * scale;
                 const hw = roadWidth / 2;
 
                 // Precompute arm points
@@ -521,7 +400,7 @@ export const SimulationOverlay: React.FC<SimulationOverlayProps> = ({ intersecti
 
             // --- 4. Global Vehicle Update & Render ---
             vehiclesRef.current = vehiclesRef.current.map(v => {
-                const inter = intersections.find(i => Math.abs(i.lat - ROUNDABOUT_LAT) < 0.001) || intersections[0];
+                const inter = intersections.find(i => i.type === 'ROUNDABOUT') || intersections[0];
                 const { snapCenter, arms } = getRoadData(inter);
                 const arm = arms[v.startArmIndex];
                 const exitArm = arms[v.endArmIndex];
@@ -619,7 +498,7 @@ export const SimulationOverlay: React.FC<SimulationOverlayProps> = ({ intersecti
 
         draw();
         return () => { if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current); };
-    }, [map, intersections, osmData]);
+    }, [map, intersections]);
 
     return (
         <canvas

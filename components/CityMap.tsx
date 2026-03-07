@@ -50,6 +50,28 @@ const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyAct
         onIntersectionClick(inter.id);
     }, [onIntersectionClick]);
 
+    // Helper to get color based on type
+    const getTypeColor = (type?: string) => {
+        switch (type) {
+            case 'T': return '#ffd000';
+            case 'FOUR_WAY': return '#00ffa6';
+            case 'COMPLEX': return '#ff8c00';
+            case 'ROUNDABOUT': return '#00aaff';
+            case 'TRAFFIC_SIGNAL': return '#00ffa6';
+            default: return '#00ffa6';
+        }
+    };
+
+    const getTypeRadius = (type?: string) => {
+        switch (type) {
+            case 'T': return 7;
+            case 'FOUR_WAY': return 9;
+            case 'COMPLEX': return 10;
+            case 'ROUNDABOUT': return 12;
+            default: return 9;
+        }
+    };
+
     // Helper to get color based on density
     const getDensityColor = (density: number) => {
         if (density > 0.7) return '#ef4444'; // Red
@@ -57,16 +79,19 @@ const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyAct
         return '#10b981'; // Green
     };
 
-    // Emergency Path
+    // Emergency Path (Just pick a simple path from real intersections)
     const emergencyPath: [number, number][] = intersections
-        .filter(i => i.id.startsWith('I-10') && parseInt(i.id.slice(3)) <= 5)
+        .slice(0, 5)
         .map(i => [i.lat, i.lng]);
 
     return (
         <div className="w-full h-full relative">
             <MapContainer
-                center={center}
-                zoom={zoomLevel}
+                center={[25.4515, 81.835]}
+                zoom={15}
+                minZoom={14}
+                maxZoom={18}
+                scrollWheelZoom={true}
                 style={{ height: '100%', width: '100%', background: '#0a0b1e' }}
                 zoomControl={false}
             >
@@ -106,12 +131,18 @@ const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyAct
                     <CircleMarker
                         key={inter.id}
                         center={[inter.lat, inter.lng]}
-                        radius={selectedId === inter.id ? (zoom - 2) : (zoom - 5)}
-                        fillColor={inter.nsSignal === 'GREEN' ? '#10b981' : '#ef4444'}
-                        color={selectedId === inter.id ? '#ffffff' : '#ffffff'}
-                        weight={selectedId === inter.id ? 4 : 2}
-                        fillOpacity={0.8}
-                        className={selectedId === inter.id ? "selected-intersection-pulse" : ""}
+                        radius={9}
+                        color="#00ffa6"
+                        fillColor="#00ffa6"
+                        weight={2}
+                        fillOpacity={0.9}
+                        pathOptions={{
+                            color: "#00ffa6",
+                            fillColor: "#00ffa6",
+                            fillOpacity: 0.9,
+                            weight: 2
+                        }}
+                        className={`leaflet-intersection-node ${selectedId === inter.id ? "selected-intersection-pulse" : ""}`}
                         eventHandlers={{
                             click: () => handleNodeClick(inter)
                         }}
@@ -119,7 +150,7 @@ const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyAct
                         <Tooltip>
                             <div className="bg-slate-900 text-white p-2 rounded border border-slate-700">
                                 <span className="font-bold">Intersection {inter.id}</span><br />
-                                <span className="text-xs">NS: {inter.nsSignal} | EW: {inter.ewSignal}</span>
+                                <span className="text-xs">Type: {inter.type} | NS: {inter.nsSignal} | EW: {inter.ewSignal}</span>
                                 <div className="w-full h-1 bg-slate-800 mt-1 rounded-full overflow-hidden">
                                     <div className="h-full bg-blue-500" style={{ width: `${inter.density * 100}%` }}></div>
                                 </div>
@@ -129,6 +160,9 @@ const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyAct
                 ))}
 
                 <style>{`
+                    .leaflet-intersection-node {
+                        filter: drop-shadow(0 0 6px #00ffa6);
+                    }
                     .selected-intersection-pulse {
                         filter: drop-shadow(0 0 12px #3b82f6);
                         stroke-width: 4px;

@@ -23,6 +23,10 @@ export interface IntersectionStatus {
   id: string;
   lat: number;
   lng: number;
+  connections?: number;
+  type?: 'T' | 'FOUR_WAY' | 'COMPLEX' | 'ROUNDABOUT' | 'TRAFFIC_SIGNAL';
+  congestionScore?: number;
+  armAngles?: number[];
   nsSignal: SignalState;
   ewSignal: SignalState;
   timer: number;
