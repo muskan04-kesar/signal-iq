@@ -20,8 +20,8 @@ const LiveMapView: React.FC = () => {
         if (!response.ok) return;
         const data = await response.json();
 
-        const centerLat = 28.6327;
-        const centerLng = 77.2197;
+        const centerLat = 25.4484;
+        const centerLng = 81.8437;
         const spacing = 0.003;
 
         const enrichedIntersections = (data.intersections || []).map((inter: any, idx: number) => {

@@ -55,8 +55,8 @@ const App: React.FC = () => {
         const data = await response.json();
 
         // Enrich intersections with coordinates and density
-        const centerLat = 28.6327;
-        const centerLng = 77.2197;
+        const centerLat = 25.473034;
+        const centerLng = 81.878357;
         const spacing = 0.003;
 
         const enrichedIntersections = (data.intersections || []).map((inter: any, idx: number) => {

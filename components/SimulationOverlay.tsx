@@ -1,7 +1,5 @@
-import React, { useRef, useEffect, useMemo } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { useMapEvents, useMap } from 'react-leaflet';
-import { createPortal } from 'react-dom';
-import L from 'leaflet';
 import { IntersectionStatus, Vehicle } from '../types';
 
 interface SimulationOverlayProps {
@@ -11,24 +9,99 @@ interface SimulationOverlayProps {
     selectedIntersectionId: string | null;
 }
 
-export const SimulationOverlay: React.FC<SimulationOverlayProps> = ({ intersections, vehicles, onIntersectionClick, selectedIntersectionId }) => {
+interface RoundaboutVehicle {
+    id: string;
+    pathType: 'entry' | 'circle' | 'exit';
+    startArmIndex: number;
+    endArmIndex: number;
+    progress: number;
+    circleAngle: number;
+    exitAngle: number;
+    speed: number;
+    color: string;
+    trail: { x: number; y: number; angle: number }[];
+}
+
+// Helpers for OSM geometry
+const distHaversine = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const R = 6371e3;
+    const p1 = lat1 * Math.PI / 180;
+    const p2 = lat2 * Math.PI / 180;
+    const dp = (lat2 - lat1) * Math.PI / 180;
+    const dl = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dp / 2) * Math.sin(dp / 2) + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) * Math.sin(dl / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+};
+
+const getBearing = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const y = Math.sin(dLon) * Math.cos(lat2 * Math.PI / 180);
+    const x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) -
+        Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos(dLon);
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+};
+
+export const SimulationOverlay: React.FC<SimulationOverlayProps> = ({ intersections, selectedIntersectionId }) => {
     const map = useMap();
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const animationFrameRef = useRef<number | null>(null);
+    const vehiclesRef = useRef<RoundaboutVehicle[]>([]);
 
-    // Synchronize canvas size and position with Leaflet's layer system
-    const syncCanvas = () => {
+    const signalTimerRef = useRef<number>(0);
+    const [osmData, setOsmData] = useState<Record<string, { snapCenter: { lat: number, lng: number }, arms: { path: { lat: number, lng: number }[], angle: number, length: number }[] }>>({});
+
+    const ROUNDABOUT_LAT = 25.473034;
+    const ROUNDABOUT_LNG = 81.878357;
+
+    const getRoadData = (inter: IntersectionStatus) => {
+        if (osmData[inter.id] && osmData[inter.id].arms.length > 0) {
+            return osmData[inter.id];
+        }
+
+        const isRoundabout = Math.abs(inter.lat - ROUNDABOUT_LAT) < 0.0001 && Math.abs(inter.lng - ROUNDABOUT_LNG) < 0.0001;
+        const arms = (isRoundabout ? [0, 60, 120, 180, 240, 300] : [0, 90, 180, 270]).map(angle => ({
+            angle: (angle - 90) * (Math.PI / 180),
+            length: 120,
+            path: [] as { lat: number, lng: number }[]
+        }));
+
+        return { snapCenter: { lat: inter.lat, lng: inter.lng }, arms };
+    };
+
+    const samplePolyline = (pts: { x: number, y: number }[], t: number) => {
+        if (!pts || pts.length < 2) return pts?.[0] ? { ...pts[0], angle: 0 } : { x: 0, y: 0, angle: 0 };
+        if (t <= 0) return { ...pts[0], angle: Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x) };
+        if (t >= 1) return { ...pts[pts.length - 1], angle: Math.atan2(pts[pts.length - 1].y - pts[pts.length - 2].y, pts[pts.length - 1].x - pts[pts.length - 2].x) };
+
+        let totalLen = 0;
+        const lens: number[] = [];
+        for (let i = 0; i < pts.length - 1; i++) {
+            const d = Math.sqrt((pts[i + 1].x - pts[i].x) ** 2 + (pts[i + 1].y - pts[i].y) ** 2);
+            lens.push(d);
+            totalLen += d;
+        }
+
+        const targetDist = t * totalLen;
+        let currDist = 0;
+        for (let i = 0; i < pts.length - 1; i++) {
+            if (currDist + lens[i] >= targetDist) {
+                const segT = lens[i] > 0 ? (targetDist - currDist) / lens[i] : 0;
+                return {
+                    x: pts[i].x + (pts[i + 1].x - pts[i].x) * segT,
+                    y: pts[i].y + (pts[i + 1].y - pts[i].y) * segT,
+                    angle: Math.atan2(pts[i + 1].y - pts[i].y, pts[i + 1].x - pts[i].x)
+                };
+            }
+            currDist += lens[i];
+        }
+        return { ...pts[pts.length - 1], angle: 0 };
+    };
+
+    const resizeCanvas = () => {
         const canvas = canvasRef.current;
         if (!canvas) return;
-
         const size = map.getSize();
-        // The top-left corner of the viewport in layer points
-        const topLeft = map.containerPointToLayerPoint([0, 0]);
-
-        // Anchor the canvas to the top-left of the viewport within the overlay pane
-        L.DomUtil.setPosition(canvas, topLeft);
-
-        // Match the viewport size
         if (canvas.width !== size.x || canvas.height !== size.y) {
             canvas.width = size.x;
             canvas.height = size.y;
@@ -36,14 +109,128 @@ export const SimulationOverlay: React.FC<SimulationOverlayProps> = ({ intersecti
     };
 
     useMapEvents({
-        move: () => syncCanvas(),
-        zoom: () => syncCanvas(),
-        viewreset: () => syncCanvas(),
-        resize: () => syncCanvas()
+        move: resizeCanvas,
+        zoom: resizeCanvas,
+        viewreset: resizeCanvas,
+        resize: resizeCanvas
     });
 
     useEffect(() => {
-        syncCanvas();
+        if (!intersections.length) return;
+        let isMounted = true;
+
+        const fetchOsm = async () => {
+            try {
+                // Determine bounding box around all intersections, or simply bundle around-queries.
+                // We'll bundle ways around each intersection. Max queries limited to avoid too long requests.
+                const validIntersections = intersections.slice(0, 50); // cap length for safety
+                if (validIntersections.length === 0) return;
+
+                let queryBody = validIntersections.map(inter =>
+                    `way(around:120,${inter.lat},${inter.lng})[highway~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|service)$"];`
+                ).join('');
+
+                const query = `[out:json];(${queryBody});out geom;`;
+
+                const response = await fetch('https://overpass-api.de/api/interpreter', {
+                    method: 'POST',
+                    body: query
+                });
+
+                const data = await response.json();
+                console.log("Overpass response:", data);
+
+                const newOsmData: Record<string, any> = {};
+
+                validIntersections.forEach(inter => {
+                    const arms: any[] = [];
+                    let snapCenter = { lat: inter.lat, lng: inter.lng };
+                    let globalMinD = Infinity;
+
+                    data.elements?.forEach((way: any) => {
+                        let minD = Infinity;
+                        let minIdx = -1;
+                        if (!way.geometry) return;
+
+                        way.geometry.forEach((geom: any, idx: number) => {
+                            const d = distHaversine(inter.lat, inter.lng, geom.lat, geom.lon);
+                            if (d < minD) { minD = d; minIdx = idx; }
+                            if (d < globalMinD) { globalMinD = d; snapCenter = { lat: geom.lat, lng: geom.lon }; }
+                        });
+
+                        // If way connects relatively close to intersection center (tolerance 50m)
+                        if (minD < 50) {
+                            const makePath = (step: number) => {
+                                const path = [];
+                                let currDist = 0;
+                                let currIdx = minIdx;
+                                while (currIdx >= 0 && currIdx < way.geometry.length) {
+                                    const pt = way.geometry[currIdx];
+                                    path.push({ lat: pt.lat, lng: pt.lon });
+                                    currDist = distHaversine(inter.lat, inter.lng, pt.lat, pt.lon);
+                                    if (currDist > 150) break; // Extract up to 150m
+                                    currIdx += step;
+                                }
+                                return path;
+                            };
+
+                            if (minIdx > 0 || (way.nodes && way.nodes[0] === way.nodes[way.nodes.length - 1])) {
+                                const path = makePath(-1);
+                                if (path.length > 1) {
+                                    let farNode = path[path.length - 1];
+                                    for (let i = 0; i < path.length; i++) {
+                                        if (distHaversine(path[0].lat, path[0].lng, path[i].lat, path[i].lng) > 15) { farNode = path[i]; break; }
+                                    }
+                                    arms.push({ path, bearing: getBearing(path[0].lat, path[0].lng, farNode.lat, farNode.lng) });
+                                }
+                            }
+                            if (minIdx < way.geometry.length - 1 || (way.nodes && way.nodes[0] === way.nodes[way.nodes.length - 1])) {
+                                const path = makePath(1);
+                                if (path.length > 1) {
+                                    let farNode = path[path.length - 1];
+                                    for (let i = 0; i < path.length; i++) {
+                                        if (distHaversine(path[0].lat, path[0].lng, path[i].lat, path[i].lng) > 15) { farNode = path[i]; break; }
+                                    }
+                                    arms.push({ path, bearing: getBearing(path[0].lat, path[0].lng, farNode.lat, farNode.lng) });
+                                }
+                            }
+                        }
+                    });
+
+                    if (arms.length > 0) {
+                        // Filter duplicates (roads within 20 degrees are likely the same)
+                        const uniqueArms: any[] = [];
+                        arms.forEach(a => {
+                            if (!uniqueArms.some(ua => Math.abs(ua.bearing - a.bearing) < 20 || Math.abs(ua.bearing - a.bearing) > 340)) {
+                                uniqueArms.push({
+                                    path: a.path,
+                                    angle: (a.bearing - 90) * (Math.PI / 180),
+                                    length: 120
+                                });
+                            }
+                        });
+
+                        newOsmData[inter.id] = { snapCenter, arms: uniqueArms };
+                    }
+                });
+
+                if (isMounted) {
+                    setOsmData(prev => {
+                        const next = { ...prev, ...newOsmData };
+                        return next;
+                    });
+                }
+            } catch (err) {
+                console.error("OSM Fetch error", err);
+            }
+        };
+        fetchOsm();
+
+        return () => { isMounted = false; };
+    }, [intersections]);
+
+    useEffect(() => {
+        resizeCanvas();
 
         const draw = () => {
             const canvas = canvasRef.current;
@@ -51,239 +238,402 @@ export const SimulationOverlay: React.FC<SimulationOverlayProps> = ({ intersecti
             const ctx = canvas.getContext('2d');
             if (!ctx) return;
 
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
             const zoom = map.getZoom();
-            if (zoom < 17) return; // safety check
-
-            const scaleFactor = Math.pow(2, zoom - 18);
-            const roadWidth = 44 * scaleFactor;
-            const roadLength = 160 * scaleFactor;
-
-            // Get current viewport origin in layer points for relative drawing
-            const topLeft = map.containerPointToLayerPoint([0, 0]);
-
-            // If we have a selected intersection, identify its row/col for vehicle filtering
-            let selectedRow: number | null = null;
-            let selectedCol: number | null = null;
-
-            if (selectedIntersectionId && intersections.length > 0) {
-                const target = intersections.find(i => i.id === selectedIntersectionId) || intersections[0];
-                selectedRow = Math.round((target.lat - 28.6327) / 0.003) + 2;
-                selectedCol = Math.round((target.lng - 77.2197) / 0.003) + 2;
+            if (zoom < 15) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                animationFrameRef.current = requestAnimationFrame(draw);
+                return;
             }
 
-            // Draw each intersection
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const scale = Math.pow(2, zoom - 17);
+            const circleRadius = 60 * scale;
+            const isHighZoom = zoom >= 17;
+
+            // --- 1. Map Mask Layer (Fade background tiles) ---
+            if (isHighZoom && intersections.length > 0) {
+                const targetInter = intersections.find(i => i.id === selectedIntersectionId) || intersections[0];
+                const { snapCenter } = getRoadData(targetInter);
+                const cp = map.latLngToContainerPoint(snapCenter);
+
+                const maxDim = Math.max(canvas.width, canvas.height);
+                const maskGrad = ctx.createRadialGradient(cp.x, cp.y, circleRadius, cp.x, cp.y, maxDim * 0.7);
+                maskGrad.addColorStop(0, 'rgba(0,0,0,0)');
+                maskGrad.addColorStop(0.3, 'rgba(0,0,0,0.5)');
+                maskGrad.addColorStop(1, 'rgba(0,0,0,0.8)');
+
+                ctx.fillStyle = maskGrad;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+            // --- 2. Signal Logic ---
+            signalTimerRef.current += 1;
+            const getSignalInfo = (index: number) => {
+                const cycleTime = 600;
+                const offset = index * (cycleTime / 6);
+                const localTime = (signalTimerRef.current + offset) % cycleTime;
+                if (localTime < cycleTime * 0.6) return 'RED';
+                if (localTime < cycleTime * 0.7) return 'YELLOW';
+                return 'GREEN';
+            };
+
+            // --- 2. Per-Intersection Rendering ---
             intersections.forEach(inter => {
-                const layerPoint = map.latLngToLayerPoint([inter.lat, inter.lng]);
-                const x = layerPoint.x - topLeft.x;
-                const y = layerPoint.y - topLeft.y;
+                const { snapCenter, arms } = getRoadData(inter);
+                const centerPoint = map.latLngToContainerPoint(snapCenter);
+                const ix = centerPoint.x, iy = centerPoint.y;
 
-                ctx.save();
-                ctx.translate(x, y);
+                const roadColor = isHighZoom ? '#3a3f45' : '#2c2f33';
+                const markingColor = '#e0e0e0';
+                const roadWidth = 28 * scale;
+                const hw = roadWidth / 2;
 
-                // --- 1. Asphalt Foundation ---
-                ctx.fillStyle = '#111218'; // Darker, more matte asphalt
-
-                // EW Road
-                ctx.fillRect(-roadLength / 2, -roadWidth / 2, roadLength, roadWidth);
-                // NS Road
-                ctx.fillRect(-roadWidth / 2, -roadLength / 2, roadWidth, roadLength);
-
-                // --- 2. Inner Shadow / Depth ---
-                ctx.save();
-                ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-                ctx.lineWidth = 4 * scaleFactor;
-                ctx.shadowBlur = 10 * scaleFactor;
-                ctx.shadowColor = 'black';
-
-                // Draw edges to create "inner shadow" effect
-                ctx.strokeRect(-roadLength / 2, -roadWidth / 2, roadLength, roadWidth);
-                ctx.strokeRect(-roadWidth / 2, -roadLength / 2, roadWidth, roadLength);
-                ctx.restore();
-
-                // --- 3. Road Texture (Subtle Grain) ---
-                ctx.save();
-                ctx.globalAlpha = 0.05;
-                for (let i = 0; i < 150; i++) {
-                    const gx = Math.random() * roadLength - roadLength / 2;
-                    const gy = Math.random() * roadWidth - roadWidth / 2;
-                    ctx.fillStyle = Math.random() > 0.5 ? 'white' : 'black';
-                    ctx.fillRect(gx, gy, 1, 1);
-                    ctx.fillRect(gy, gx, 1, 1);
-                }
-                ctx.restore();
-
-                // --- 4. Markings ---
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
-                ctx.lineWidth = 1.2 * scaleFactor;
-                ctx.setLineDash([8 * scaleFactor, 12 * scaleFactor]);
-
-                ctx.beginPath();
-                ctx.moveTo(-roadLength / 2, 0); ctx.lineTo(roadLength / 2, 0);
-                ctx.moveTo(0, -roadLength / 2); ctx.lineTo(0, roadLength / 2);
-                ctx.stroke();
-                ctx.setLineDash([]);
-
-                // Stop Lines & Intersection Cross
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-                ctx.lineWidth = 2.5 * scaleFactor;
-                ctx.beginPath();
-                // Corners of the center square
-                const sw = roadWidth / 2;
-                ctx.moveTo(-sw, -sw); ctx.lineTo(sw, -sw);
-                ctx.moveTo(-sw, sw); ctx.lineTo(sw, sw);
-                ctx.moveTo(-sw, -sw); ctx.lineTo(-sw, sw);
-                ctx.moveTo(sw, -sw); ctx.lineTo(sw, sw);
-                ctx.stroke();
-
-                // --- 5. Signal Equipment ---
-                const drawSignalModel = (sx: number, sy: number, state: string, angle: number) => {
-                    ctx.save();
-                    ctx.translate(sx, sy);
-                    ctx.rotate(angle);
-
-                    // Signal Arm/Pole
-                    ctx.fillStyle = '#2d3748';
-                    ctx.fillRect(0, -2 * scaleFactor, 15 * scaleFactor, 4 * scaleFactor);
-
-                    // Signal Head
-                    ctx.fillStyle = '#1a202c';
-                    // Check if roundRect is available, otherwise fallback to rect
-                    if (typeof ctx.roundRect === 'function') {
-                        ctx.roundRect(10 * scaleFactor, -6 * scaleFactor, 10 * scaleFactor, 18 * scaleFactor, 2 * scaleFactor);
+                // Precompute arm points
+                const processedArms = arms.map(arm => {
+                    let pts: { x: number, y: number }[] = [];
+                    if (arm.path && arm.path.length > 1) {
+                        pts = arm.path.map(pt => map.latLngToContainerPoint(pt));
                     } else {
-                        ctx.fillRect(10 * scaleFactor, -6 * scaleFactor, 10 * scaleFactor, 18 * scaleFactor);
+                        const armLen = arm.length * scale;
+                        pts = [
+                            { x: ix, y: iy },
+                            { x: ix + Math.cos(arm.angle) * armLen, y: iy + Math.sin(arm.angle) * armLen }
+                        ];
                     }
-                    ctx.fill();
+                    const totalLen = Math.sqrt((pts[pts.length - 1].x - pts[0].x) ** 2 + (pts[pts.length - 1].y - pts[0].y) ** 2) || 1;
+                    return { ...arm, pts, totalLen };
+                });
 
-                    // Lights
-                    const colors = state === 'RED' ? ['#ef4444', '#1a202c', '#1a202c'] :
-                        state === 'YELLOW' ? ['#1a202c', '#f59e0b', '#1a202c'] :
-                            ['#1a202c', '#1a202c', '#10b981'];
+                // Background Glow/Blend (only at low zoom for feathered style)
+                if (!isHighZoom) {
+                    const radialGrad = ctx.createRadialGradient(ix, iy, circleRadius, ix, iy, circleRadius * 4);
+                    radialGrad.addColorStop(0, 'rgba(0,0,0,0.5)');
+                    radialGrad.addColorStop(1, 'transparent');
+                    ctx.fillStyle = radialGrad;
+                    ctx.beginPath(); ctx.arc(ix, iy, circleRadius * 4, 0, Math.PI * 2); ctx.fill();
+                }
 
-                    colors.forEach((c, i) => {
-                        ctx.fillStyle = c;
-                        if (c !== '#1a202c') {
-                            ctx.shadowBlur = 12 * scaleFactor;
-                            ctx.shadowColor = c;
-                        }
-                        ctx.beginPath();
-                        ctx.arc(15 * scaleFactor, -2 * scaleFactor + (i * 5 * scaleFactor), 1.8 * scaleFactor, 0, Math.PI * 2);
-                        ctx.fill();
-                        ctx.shadowBlur = 0;
-                    });
+                if (inter.density > 0.4) {
+                    ctx.save();
+                    ctx.shadowBlur = 15 * scale;
+                    ctx.shadowColor = 'rgba(0, 255, 150, 0.4)';
+                    ctx.fillStyle = 'rgba(0, 255, 150, 0.1)';
+                    ctx.beginPath(); ctx.arc(ix, iy, circleRadius + 10 * scale, 0, Math.PI * 2); ctx.fill();
                     ctx.restore();
-                };
+                }
 
-                const off = roadWidth / 1.8;
-                drawSignalModel(-off, -off, inter.nsSignal, 0);
-                drawSignalModel(off, -off, inter.ewSignal, Math.PI / 2);
-                drawSignalModel(off, off, inter.nsSignal, Math.PI);
-                drawSignalModel(-off, off, inter.ewSignal, -Math.PI / 2);
+                // PASS 1: Road Surfaces
+                processedArms.forEach((arm) => {
+                    const { pts } = arm;
+                    ctx.save();
+                    ctx.lineCap = isHighZoom ? 'butt' : 'round';
+                    ctx.lineJoin = 'round';
+                    ctx.lineWidth = roadWidth;
 
-                ctx.restore();
+                    ctx.beginPath();
+                    ctx.moveTo(pts[0].x, pts[0].y);
+                    for (let j = 1; j < pts.length; j++) ctx.lineTo(pts[j].x, pts[j].y);
+
+                    if (isHighZoom) {
+                        ctx.strokeStyle = roadColor;
+                    } else {
+                        const armGrad = ctx.createLinearGradient(pts[0].x, pts[0].y, pts[pts.length - 1].x, pts[pts.length - 1].y);
+                        armGrad.addColorStop(0, roadColor);
+                        armGrad.addColorStop(0.8, roadColor);
+                        armGrad.addColorStop(1, 'transparent');
+                        ctx.strokeStyle = armGrad;
+                    }
+                    ctx.stroke();
+                    ctx.restore();
+                });
+
+                // PASS 2: Intersection Center (Solid block for SUMO style with glow)
+                if (isHighZoom) {
+                    ctx.save();
+                    ctx.shadowBlur = 20 * scale;
+                    ctx.shadowColor = 'rgba(0, 255, 180, 0.25)';
+                    ctx.fillStyle = roadColor;
+                    ctx.beginPath();
+                    ctx.arc(ix, iy, circleRadius + 2 * scale, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                }
+
+                // PASS 3: Road Details (Zebra Crossings, Stop Lines, Dividers)
+                processedArms.forEach((arm, i) => {
+                    const { pts, totalLen } = arm;
+
+                    // Lane Divider
+                    ctx.save();
+                    ctx.strokeStyle = markingColor;
+                    ctx.globalAlpha = 0.7;
+                    ctx.lineWidth = isHighZoom ? 1.5 * scale : 1 * scale;
+                    ctx.setLineDash([6 * scale, 6 * scale]);
+                    ctx.beginPath();
+
+                    const divStartDist = isHighZoom ? circleRadius + 20 * scale : circleRadius;
+                    const divStartPt = samplePolyline(pts, Math.min(1, divStartDist / totalLen));
+                    ctx.moveTo(divStartPt.x, divStartPt.y);
+                    for (let j = 1; j < pts.length; j++) {
+                        // Rough check to prevent drawing inside the intersection
+                        const d = Math.sqrt((pts[j].x - ix) ** 2 + (pts[j].y - iy) ** 2);
+                        if (d >= divStartDist) {
+                            ctx.lineTo(pts[j].x, pts[j].y);
+                        }
+                    }
+                    ctx.stroke();
+                    ctx.restore();
+
+                    // Road Boundaries (SUMO style)
+                    if (isHighZoom) {
+                        ctx.save();
+                        ctx.strokeStyle = markingColor;
+                        ctx.lineWidth = 1 * scale;
+                        ctx.beginPath();
+                        // Draw boundaries approx
+                        const boundStartPt = samplePolyline(pts, Math.min(1, (circleRadius - 2 * scale) / totalLen));
+                        const nx = -Math.sin(boundStartPt.angle), ny = Math.cos(boundStartPt.angle);
+
+                        // We would need to offset the entire polyline. For now, just drawing simple side segments starting past crosswalk
+                        const sideStartDist = circleRadius + 2 * scale;
+                        const sideStartPt = samplePolyline(pts, sideStartDist / totalLen);
+                        const s_nx = -Math.sin(sideStartPt.angle), s_ny = Math.cos(sideStartPt.angle);
+
+                        // Right edge
+                        ctx.moveTo(sideStartPt.x + s_nx * hw, sideStartPt.y + s_ny * hw);
+                        ctx.lineTo(pts[pts.length - 1].x + s_nx * hw, pts[pts.length - 1].y + s_ny * hw);
+
+                        // Left edge
+                        ctx.moveTo(sideStartPt.x - s_nx * hw, sideStartPt.y - s_ny * hw);
+                        ctx.lineTo(pts[pts.length - 1].x - s_nx * hw, pts[pts.length - 1].y - s_ny * hw);
+                        ctx.stroke();
+                        ctx.restore();
+                    }
+
+                    // Zebra Crossing and Stop Line
+                    if (isHighZoom) {
+                        const crossDist = circleRadius + 5 * scale;
+                        const crossPt = samplePolyline(pts, crossDist / totalLen);
+                        const nx = -Math.sin(crossPt.angle);
+                        const ny = Math.cos(crossPt.angle);
+
+                        // Draw Zebra stripes
+                        ctx.save();
+                        ctx.fillStyle = markingColor;
+                        const numStripes = 6;
+                        const stripeWidth = 2 * scale;
+                        const stripeLen = 10 * scale;
+                        const gap = roadWidth / numStripes;
+                        for (let s = 0; s < numStripes; s++) {
+                            const offset = -hw + gap / 2 + s * gap;
+                            const sx = crossPt.x + nx * offset;
+                            const sy = crossPt.y + ny * offset;
+
+                            ctx.translate(sx, sy);
+                            ctx.rotate(crossPt.angle);
+                            ctx.fillRect(-stripeLen / 2, -stripeWidth / 2, stripeLen, stripeWidth);
+                            ctx.rotate(-crossPt.angle);
+                            ctx.translate(-sx, -sy);
+                        }
+                        ctx.restore();
+
+                        // Stop line (thick behind zebra crossing)
+                        const stopDist = crossDist + 8 * scale;
+                        const stopPt = samplePolyline(pts, stopDist / totalLen);
+                        const st_nx = -Math.sin(stopPt.angle), st_ny = Math.cos(stopPt.angle);
+                        ctx.strokeStyle = markingColor;
+                        ctx.lineWidth = 3 * scale;
+                        ctx.beginPath();
+                        ctx.moveTo(stopPt.x - st_nx * hw, stopPt.y - st_ny * hw);
+                        ctx.lineTo(stopPt.x + st_nx * hw, stopPt.y + st_ny * hw);
+                        ctx.stroke();
+                    } else {
+                        // Standard low-zoom stop line
+                        const stopDist = circleRadius + 15 * scale;
+                        const stopPt = samplePolyline(pts, stopDist / totalLen || 0.1);
+                        const nx = -Math.sin(stopPt.angle), ny = Math.cos(stopPt.angle);
+                        ctx.strokeStyle = '#cfd3d7';
+                        ctx.lineWidth = 3 * scale;
+                        ctx.beginPath();
+                        ctx.moveTo(stopPt.x - nx * 14 * scale, stopPt.y - ny * 14 * scale);
+                        ctx.lineTo(stopPt.x + nx * 14 * scale, stopPt.y + ny * 14 * scale);
+                        ctx.stroke();
+                    }
+
+                    // Signal Indicator
+                    const sigDist = circleRadius + (isHighZoom ? 25 * scale : 35 * scale);
+                    const sigPt = samplePolyline(pts, sigDist / totalLen || 0.2);
+                    const state = getSignalInfo(i);
+                    ctx.fillStyle = '#1e293b';
+                    ctx.fillRect(sigPt.x - 4 * scale, sigPt.y - 18 * scale, 8 * scale, 18 * scale);
+
+                    const drawLamp = (color: string, idx: number, active: boolean) => {
+                        ctx.save();
+                        ctx.globalAlpha = active ? 1 : 0.2;
+                        ctx.fillStyle = active ? color : '#0f172a';
+                        if (active) { ctx.shadowBlur = 8 * scale; ctx.shadowColor = color; }
+                        ctx.beginPath(); ctx.arc(sigPt.x, sigPt.y - 15 * scale + idx * 5 * scale, 2.5 * scale, 0, Math.PI * 2); ctx.fill();
+                        ctx.restore();
+                    };
+                    drawLamp('#ef4444', 0, state === 'RED');
+                    drawLamp('#f59e0b', 1, state === 'YELLOW');
+                    drawLamp('#22c55e', 2, state === 'GREEN');
+                });
+
+                // HUD Label
+                if (zoom >= 17) {
+                    ctx.save();
+                    ctx.translate(ix + 20 * scale, iy - 70 * scale);
+                    ctx.fillStyle = 'rgba(2, 6, 23, 0.9)';
+                    ctx.strokeStyle = '#0ea5e9';
+                    ctx.strokeRect(0, 0, 80 * scale, 45 * scale);
+                    ctx.fillRect(0, 0, 80 * scale, 45 * scale);
+                    ctx.fillStyle = '#0ea5e9';
+                    ctx.font = `bold ${Math.floor(10 * scale)}px monospace`;
+                    ctx.fillText(inter.id.substring(0, 8), 5 * scale, 15 * scale);
+                    ctx.fillStyle = '#94a3b8';
+                    ctx.font = `${Math.floor(8 * scale)}px sans-serif`;
+                    ctx.fillText(`FLOW: ${Math.floor(inter.density * 100)}%`, 5 * scale, 28 * scale);
+                    ctx.fillText(`WAIT: ${Math.floor(inter.density * 50)}s`, 5 * scale, 38 * scale);
+                    ctx.restore();
+                }
+
+                // --- 3. Vehicle Simulation (Local Spawn) ---
+                if (vehiclesRef.current.length < 25 && Math.random() < 0.05) {
+                    const startArmIdx = Math.floor(Math.random() * arms.length);
+                    let endArmIdx = Math.floor(Math.random() * arms.length);
+                    while (endArmIdx === startArmIdx) endArmIdx = Math.floor(Math.random() * arms.length);
+
+                    vehiclesRef.current.push({
+                        id: `v-${Math.random()}`,
+                        pathType: 'entry',
+                        startArmIndex: startArmIdx,
+                        endArmIndex: endArmIdx,
+                        progress: 0,
+                        circleAngle: arms[startArmIdx].angle,
+                        exitAngle: arms[endArmIdx].angle,
+                        speed: (1.4 + Math.random()) * scale,
+                        color: '#f8fafc',
+                        trail: []
+                    });
+                }
             });
 
-            // Draw Vehicles
-            vehicles.forEach(vehicle => {
-                const roadType = vehicle.laneId.startsWith('H') ? 'H' : 'V';
-                const roadIdx = parseInt(vehicle.laneId.substring(1));
+            // --- 4. Global Vehicle Update & Render ---
+            vehiclesRef.current = vehiclesRef.current.map(v => {
+                const inter = intersections.find(i => Math.abs(i.lat - ROUNDABOUT_LAT) < 0.001) || intersections[0];
+                const { snapCenter, arms } = getRoadData(inter);
+                const arm = arms[v.startArmIndex];
+                const exitArm = arms[v.endArmIndex];
+                if (!arm || !exitArm) return v;
 
-                if (selectedRow !== null && selectedCol !== null) {
-                    if (roadType === 'H' && roadIdx !== selectedRow) return;
-                    if (roadType === 'V' && roadIdx !== selectedCol) return;
+                const centerPoint = map.latLngToContainerPoint(snapCenter);
+                const ix = centerPoint.x, iy = centerPoint.y;
+
+                const entryPts = arm.path && arm.path.length > 1 ? arm.path.map(pt => map.latLngToContainerPoint(pt)) : [{ x: ix, y: iy }, { x: ix + Math.cos(arm.angle) * 120 * scale, y: iy + Math.sin(arm.angle) * 120 * scale }];
+                const exitPts = exitArm.path && exitArm.path.length > 1 ? exitArm.path.map(pt => map.latLngToContainerPoint(pt)) : [{ x: ix, y: iy }, { x: ix + Math.cos(exitArm.angle) * 120 * scale, y: iy + Math.sin(exitArm.angle) * 120 * scale }];
+
+                // The path 0 index is the intersection center.
+                // An entering vehicle travels from t=1 to t=0
+                // An exiting vehicle travels from t=0.1 to t=1
+
+                const armLen = arm.length * scale || 150 * scale;
+                const sigState = getSignalInfo(v.startArmIndex);
+
+                if (v.pathType === 'entry') {
+                    if (v.progress > 0.65 && v.progress < 0.7 && sigState === 'RED') return v;
+                    v.progress += (v.speed / armLen);
+                    if (v.progress >= 0.85) { v.pathType = 'circle'; }
+                } else if (v.pathType === 'circle') {
+                    v.circleAngle += (v.speed / 1.5) / circleRadius;
+                    let diff = v.circleAngle - v.exitAngle;
+                    while (diff < 0) diff += Math.PI * 2;
+                    while (diff > Math.PI * 2) diff -= Math.PI * 2;
+                    if (diff < 0.1) { v.pathType = 'exit'; v.progress = 0.1; }
+                } else {
+                    v.progress += (v.speed / armLen);
                 }
 
-                const lat = roadType === 'H' ? 28.6327 + (roadIdx - 2) * 0.003 : 28.6327;
-                const lng = roadType === 'V' ? 77.2197 + (roadIdx - 2) * 0.003 : 77.2197;
+                let vx, vy, vAngle;
 
-                const posOffset = (vehicle.position / 100) * 0.012 - 0.006;
-                const vLat = roadType === 'V' ? lat + (vehicle.direction === 'north' ? -posOffset : posOffset) : lat;
-                const vLng = roadType === 'H' ? lng + (vehicle.direction === 'west' ? -posOffset : posOffset) : lng;
+                if (v.pathType === 'entry') {
+                    const t = 1.0 - v.progress;
+                    const sample = samplePolyline(entryPts, t);
+                    vx = sample.x; vy = sample.y; vAngle = sample.angle + Math.PI; // flip towards center
+                } else if (v.pathType === 'circle') {
+                    // Start of circle is entryPts near t=0 (e.g. t=0.15)
+                    const p0 = samplePolyline(entryPts, 0.15);
+                    const p2 = samplePolyline(exitPts, 0.15);
+                    const p1 = { x: ix, y: iy }; // Control point = intersection center
 
-                const layerPoint = map.latLngToLayerPoint([vLat, vLng]);
-                const vx = layerPoint.x - topLeft.x;
-                const vy = layerPoint.y - topLeft.y;
+                    // Convert angle diff to normalize bezier bounds (since circleAngle ticks linearly)
+                    let entryAng = arm.angle;
+                    let exitAng = exitArm.angle;
+                    let totalArc = exitAng - entryAng;
+                    while (totalArc < 0) totalArc += Math.PI * 2;
+                    let currentArc = v.circleAngle - entryAng;
+                    while (currentArc < 0) currentArc += Math.PI * 2;
+
+                    let bt = currentArc / totalArc;
+                    if (bt > 1) bt = 1; if (bt < 0) bt = 0;
+
+                    const mt = 1 - bt;
+                    vx = mt * mt * p0.x + 2 * mt * bt * p1.x + bt * bt * p2.x;
+                    vy = mt * mt * p0.y + 2 * mt * bt * p1.y + bt * bt * p2.y;
+                    const dx = 2 * mt * (p1.x - p0.x) + 2 * bt * (p2.x - p1.x);
+                    const dy = 2 * mt * (p1.y - p0.y) + 2 * bt * (p2.y - p1.y);
+                    vAngle = Math.atan2(dy, dx);
+                } else {
+                    const sample = samplePolyline(exitPts, v.progress);
+                    vx = sample.x; vy = sample.y; vAngle = sample.angle;
+                }
+
+                // Render Vehicle
+                v.trail.push({ x: vx, y: vy, angle: vAngle });
+                if (v.trail.length > 15) v.trail.shift();
+
+                v.trail.forEach((t, idx) => {
+                    ctx.save();
+                    ctx.translate(t.x, t.y);
+                    ctx.rotate(t.angle + Math.PI / 2);
+                    ctx.fillStyle = v.color;
+                    ctx.globalAlpha = (idx / v.trail.length) * 0.3;
+                    ctx.fillRect(-2 * scale, -2 * scale, 4 * scale, 6 * scale);
+                    ctx.restore();
+                });
 
                 ctx.save();
                 ctx.translate(vx, vy);
-                if (roadType === 'V') ctx.rotate(Math.PI / 2);
-                if (vehicle.direction === 'north' || vehicle.direction === 'west') ctx.rotate(Math.PI);
-
-                // Shadow
-                ctx.fillStyle = 'rgba(0,0,0,0.45)';
-                ctx.fillRect(-6 * scaleFactor, -1 * scaleFactor, 13 * scaleFactor, 7 * scaleFactor);
-
-                // Body
-                const vColor = vehicle.type === 'emergency' ? '#3b82f6' : '#cbd5e1';
-                ctx.fillStyle = vColor;
-                if (vehicle.type === 'emergency') {
-                    ctx.shadowBlur = 15;
-                    ctx.shadowColor = '#3b82f6';
-                }
-
-                const vw = 12 * scaleFactor;
-                const vh = 6 * scaleFactor;
-                // Check if roundRect is available, otherwise fallback to rect
-                if (typeof ctx.roundRect === 'function') {
-                    ctx.roundRect(-vw / 2, -vh / 2, vw, vh, 1 * scaleFactor);
-                } else {
-                    ctx.fillRect(-vw / 2, -vh / 2, vw, vh);
-                }
-                ctx.fill();
-
-                // Detailed Windows
-                ctx.fillStyle = '#1e293b';
-                ctx.fillRect(vw / 6, -vh / 2.5, vw / 8, vh / 1.25); // Windshield
-                ctx.fillRect(-vw / 3, -vh / 2.5, vw / 4, vh / 1.25); // Rear
-
-                // Lights
-                if (vehicle.speed > 0) {
-                    // Front Headlights
-                    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-                    ctx.beginPath();
-                    ctx.arc(vw / 2, -vh / 3.5, 0.8 * scaleFactor, 0, Math.PI * 2);
-                    ctx.arc(vw / 2, vh / 3.5, 0.8 * scaleFactor, 0, Math.PI * 2);
-                    ctx.fill();
-
-                    // Rear Tail Lights
-                    ctx.fillStyle = 'rgba(239, 68, 68, 0.8)';
-                    ctx.beginPath();
-                    ctx.arc(-vw / 2, -vh / 3.5, 0.6 * scaleFactor, 0, Math.PI * 2);
-                    ctx.arc(-vw / 2, vh / 3.5, 0.6 * scaleFactor, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-
+                ctx.rotate(vAngle + Math.PI / 2);
+                ctx.fillStyle = v.color;
+                ctx.fillRect(-2 * scale, -4 * scale, 4 * scale, 8 * scale);
+                ctx.fillStyle = '#fff';
+                ctx.beginPath(); ctx.arc(0, -4 * scale, 1 * scale, 0, Math.PI * 2); ctx.fill();
                 ctx.restore();
-            });
+
+                return v;
+            }).filter(v => v.progress < 1.0);
 
             animationFrameRef.current = requestAnimationFrame(draw);
         };
 
         draw();
+        return () => { if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current); };
+    }, [map, intersections, osmData]);
 
-        return () => {
-            if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-        };
-    }, [intersections, vehicles, selectedIntersectionId, map]);
-
-    // Render the canvas into Leaflet's overlayPane to ensure GPU-accelerated sync
-    const pane = map.getPane('overlayPane');
-    if (!pane) return null;
-
-    return createPortal(
+    return (
         <canvas
             ref={canvasRef}
             style={{
                 position: 'absolute',
+                top: 0,
+                left: 0,
                 pointerEvents: 'none',
-                zIndex: 400,
-                // Use will-change to hint browser about upcoming transforms during pan
-                willChange: 'transform'
+                zIndex: 1000,
+                width: '100%',
+                height: '100%'
             }}
-        />,
-        pane
+        />
     );
 };
 

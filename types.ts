@@ -89,3 +89,5 @@ export interface SignalDetails {
   pedestrianDemand: string;
   aiEnabled: boolean;
 }
+export const PRAYAGRAJ_CENTER: [number, number] = [25.4484, 81.8437];
+export const GRID_SPACING = 0.003;

@@ -41,7 +41,8 @@ const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyAct
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [flyToTarget, setFlyToTarget] = useState<{ lat: number, lng: number } | null>(null);
 
-    const center: [number, number] = [28.6327, 77.2197]; // Delhi Center
+    const center: [number, number] = [25.473034, 81.878357]; // Subhash Chauraha
+    const zoomLevel = 17;
 
     const handleNodeClick = useCallback((inter: IntersectionStatus) => {
         setSelectedId(inter.id);
@@ -65,7 +66,7 @@ const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyAct
         <div className="w-full h-full relative">
             <MapContainer
                 center={center}
-                zoom={13}
+                zoom={zoomLevel}
                 style={{ height: '100%', width: '100%', background: '#0a0b1e' }}
                 zoomControl={false}
             >
@@ -139,10 +140,10 @@ const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyAct
                     }
                 `}</style>
 
-                {/* ZOOM 18+: Detailed Simulation Layer */}
-                {zoom >= 18 && selectedId && (
+                {/* ZOOM 17+: Detailed Simulation Layer */}
+                {zoom >= 17 && (
                     <SimulationOverlay
-                        intersections={intersections.filter(i => i.id === selectedId)}
+                        intersections={intersections}
                         vehicles={vehicles}
                         onIntersectionClick={onIntersectionClick}
                         selectedIntersectionId={selectedId}
