@@ -52,12 +52,7 @@ const App: React.FC = () => {
   const osmSignalsRef = useRef<Partial<IntersectionStatus>[]>(CIVIL_LINES_SIGNALS as any[]);
 
   useEffect(() => {
-    fetchIntersections().then(data => {
-      if (data && data.length > 0) {
-        setOsmSignals(data);
-        osmSignalsRef.current = data;
-      }
-    });
+    // Rely exclusively on static CIVIL_LINES_SIGNALS topographical dataset
   }, []);
 
   // Fetch grid state from backend
