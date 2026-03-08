@@ -36,9 +36,11 @@ interface CityMapProps {
     emergencyVehicle: any;
     onIntersectionClick: (id: string) => void;
     showHeatmapEdges?: boolean;
+    activeEmergencyRoute?: [number, number][];
+    emergencyVehiclePos?: [number, number] | null;
 }
 
-const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyActive, emergencyVehicle, onIntersectionClick, showHeatmapEdges = false }) => {
+const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyActive, emergencyVehicle, onIntersectionClick, showHeatmapEdges = false, activeEmergencyRoute, emergencyVehiclePos }) => {
     const [zoom, setZoom] = useState(13);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [flyToTarget, setFlyToTarget] = useState<{ lat: number, lng: number } | null>(null);
@@ -87,10 +89,8 @@ const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyAct
         return 'rgba(59, 130, 246, 0.4)'; // Blue glow
     };
 
-    // Emergency Path (Just pick a simple path from real intersections)
-    const emergencyPath: [number, number][] = intersections
-        .slice(0, 5)
-        .map(i => [i.lat, i.lng]);
+    // Emergency Path (Passed externally, or fallback to dummy)
+    const emergencyPath = activeEmergencyRoute || (intersections.slice(0, 5).map(i => [i.lat, i.lng]) as [number, number][]);
 
     return (
         <div className="w-full h-full relative">
@@ -225,15 +225,38 @@ const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyAct
                 )}
 
                 {/* EMERGENCY ROUTE */}
-                {emergencyActive && (
-                    <Polyline
-                        positions={emergencyPath}
-                        color="#3b82f6"
-                        weight={6}
-                        opacity={0.8}
-                        dashArray="10, 10"
-                        className="animate-pulse"
-                    />
+                {emergencyActive && activeEmergencyRoute && activeEmergencyRoute.length > 0 && (
+                    <>
+                        <Polyline
+                            positions={activeEmergencyRoute}
+                            color="#3b82f6"
+                            weight={6}
+                            opacity={0.8}
+                            dashArray="10, 10"
+                            className="animate-pulse"
+                        />
+                        {emergencyVehiclePos && (
+                            <CircleMarker
+                                center={emergencyVehiclePos}
+                                radius={8}
+                                color="#ffffff"
+                                fillColor="#3b82f6"
+                                weight={2}
+                                fillOpacity={1}
+                                className="leaflet-emergency-marker"
+                            />
+                        )}
+                        <style>{`
+                            .leaflet-emergency-marker {
+                                filter: drop-shadow(0 0 10px #3b82f6);
+                                animation: strobe 0.5s infinite alternate;
+                            }
+                            @keyframes strobe {
+                                from { filter: drop-shadow(0 0 10px #3b82f6); opacity: 0.9; fill: #3b82f6; }
+                                to { filter: drop-shadow(0 0 20px #ef4444); opacity: 1; fill: #ef4444; }
+                            }
+                        `}</style>
+                    </>
                 )}
             </MapContainer>
 

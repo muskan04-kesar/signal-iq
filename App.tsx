@@ -48,6 +48,27 @@ const App: React.FC = () => {
   const [emergencyVehicle, setEmergencyVehicle] = useState<any>(null);
   const emergencyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Custom Local Dispatch State
+  const [activeEmergencyRoute, setActiveEmergencyRoute] = useState<string[]>([]);
+  const [emergencyVehiclePos, setEmergencyVehiclePos] = useState<[number, number] | null>(null);
+  const [emergencySegmentIndex, setEmergencySegmentIndex] = useState(0);
+
+  const handleDispatchEmergency = (route: string[], type: string) => {
+      setActiveEmergencyRoute(route);
+      setEmergencySegmentIndex(0);
+      setEmergencyActive(true);
+      const startNode = CIVIL_LINES_SIGNALS.find(s => s.id === route[0]);
+      if (startNode) {
+          setEmergencyVehiclePos([startNode.lat, startNode.lng]);
+      }
+      
+      // Notify backend strictly for analytics/switch logs
+      fetch(`http://localhost:8001/api/emergency/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }).catch(e => console.error("Failed to start emergency", e));
+  };
+
   const [osmSignals, setOsmSignals] = useState<Partial<IntersectionStatus>[]>(CIVIL_LINES_SIGNALS as any[]);
   const osmSignalsRef = useRef<Partial<IntersectionStatus>[]>(CIVIL_LINES_SIGNALS as any[]);
 
@@ -152,7 +173,65 @@ const App: React.FC = () => {
     };
   }, []);
 
-  const selectedInter = intersections.find(i => i.id === selectedIntersectionId) || intersections[0];
+  // Emergency Vehicle Routing Telemetry Loop
+  useEffect(() => {
+    if (!isEmergencyActive || activeEmergencyRoute.length < 2) return;
+
+    let currentSegmentIndex = 0;
+    let progress = 0; // 0 to 1
+    const speed = 0.05; // 5% per frame (faster simulated driving)
+
+    const interval = setInterval(() => {
+        progress += speed;
+
+        if (progress >= 1) {
+            currentSegmentIndex++;
+            setEmergencySegmentIndex(currentSegmentIndex);
+            progress = 0;
+            if (currentSegmentIndex >= activeEmergencyRoute.length - 1) {
+                // Reached destination!
+                clearInterval(interval);
+                setTimeout(() => {
+                    setEmergencyActive(false);
+                    setActiveEmergencyRoute([]);
+                    setEmergencyVehiclePos(null);
+                    fetch(`http://localhost:8001/api/emergency/stop`, { method: 'POST' }).catch(() => {});
+                }, 4000); // Linger on destination before clearing
+                return;
+            }
+        }
+
+        const s1 = CIVIL_LINES_SIGNALS.find(s => s.id === activeEmergencyRoute[currentSegmentIndex]);
+        const s2 = CIVIL_LINES_SIGNALS.find(s => s.id === activeEmergencyRoute[currentSegmentIndex + 1]);
+
+        if (s1 && s2) {
+            const lat = s1.lat + (s2.lat - s1.lat) * progress;
+            const lng = s1.lng + (s2.lng - s1.lng) * progress;
+            setEmergencyVehiclePos([lat, lng]);
+        }
+    }, 100); // 10 ticks per second
+
+    return () => clearInterval(interval);
+  }, [isEmergencyActive, activeEmergencyRoute]);
+
+  // Apply preemption logic for active emergency routes
+  const displayIntersections = intersections.map(inter => {
+      if (isEmergencyActive && activeEmergencyRoute.length > 0) {
+          const isPreempted = inter.id === activeEmergencyRoute[emergencySegmentIndex] || 
+                              inter.id === activeEmergencyRoute[emergencySegmentIndex + 1];
+          if (isPreempted) {
+              return { 
+                  ...inter, 
+                  nsSignal: 'GREEN' as const, 
+                  ewSignal: 'GREEN' as const,
+                  congestionScore: 0.1 // Force visual clear
+              };
+          }
+      }
+      return inter;
+  });
+
+  const selectedInter = displayIntersections.find(i => i.id === selectedIntersectionId) || displayIntersections[0];
 
   if (intersections.length === 0) {
     return (
@@ -170,13 +249,17 @@ const App: React.FC = () => {
       case 'Analytics':
         return <AnalyticsView />;
       case 'Emergency':
-        return <EmergencyView />;
+        return <EmergencyView onDispatch={handleDispatchEmergency} />;
       case 'Signal Control':
         return <SignalControlView />;
       case 'Infrastructure':
         return <InfrastructureView />;
       case 'Live Map':
-        return <LiveMapView />;
+        return <LiveMapView 
+          isEmergencyActive={isEmergencyActive} 
+          activeEmergencyRoute={activeEmergencyRoute} 
+          emergencyVehiclePos={emergencyVehiclePos} 
+        />;
       case 'Dashboard':
       default:
         return (
@@ -197,7 +280,20 @@ const App: React.FC = () => {
                     </div>
                   </div>
 
-                  <CityMap intersections={intersections} vehicles={vehicles} emergencyActive={isEmergencyActive} emergencyVehicle={emergencyVehicle} onIntersectionClick={setSelectedIntersectionId} />
+                  <CityMap 
+                      intersections={displayIntersections} 
+                      vehicles={vehicles} 
+                      emergencyActive={isEmergencyActive} 
+                      emergencyVehicle={emergencyVehicle} 
+                      onIntersectionClick={setSelectedIntersectionId} 
+                      activeEmergencyRoute={
+                          activeEmergencyRoute.length > 0 ? activeEmergencyRoute.map(id => {
+                              const s = CIVIL_LINES_SIGNALS.find(sig => sig.id === id);
+                              return s ? [s.lat, s.lng] : null;
+                          }).filter(Boolean) as [number, number][] : undefined
+                      }
+                      emergencyVehiclePos={emergencyVehiclePos}
+                  />
 
                   <div className="absolute bottom-4 left-4 z-20 flex gap-4 bg-black/40 backdrop-blur-sm p-3 rounded-xl border border-white/5">
                     <div className="flex items-center gap-2">

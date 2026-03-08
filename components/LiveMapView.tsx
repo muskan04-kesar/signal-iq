@@ -6,7 +6,13 @@ import { GridOverview, RoadOverview, IntersectionStatus, Vehicle } from '../type
 import CityMap from './CityMap';
 import { CIVIL_LINES_SIGNALS } from '../data/civilLinesSignals';
 
-const LiveMapView: React.FC = () => {
+interface LiveMapViewProps {
+    isEmergencyActive?: boolean;
+    activeEmergencyRoute?: string[];
+    emergencyVehiclePos?: [number, number] | null;
+}
+
+const LiveMapView: React.FC<LiveMapViewProps> = ({ isEmergencyActive = false, activeEmergencyRoute = [], emergencyVehiclePos = null }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [selectedZone, setSelectedZone] = useState('Central District');
@@ -130,10 +136,15 @@ const LiveMapView: React.FC = () => {
           <CityMap
             intersections={intersections}
             vehicles={vehicles}
-            emergencyActive={false}
+            emergencyActive={isEmergencyActive}
             emergencyVehicle={null}
             onIntersectionClick={(id) => console.log('Selected', id)}
             showHeatmapEdges={true}
+            activeEmergencyRoute={activeEmergencyRoute.length > 0 ? activeEmergencyRoute.map(id => {
+                const s = CIVIL_LINES_SIGNALS.find(sig => sig.id === id);
+                return s ? [s.lat, s.lng] : null;
+            }).filter(Boolean) as [number, number][] : undefined}
+            emergencyVehiclePos={emergencyVehiclePos}
           />
 
           {/* Map Controls */}

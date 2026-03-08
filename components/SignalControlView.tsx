@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Activity, Sliders, Zap, Search, ArrowRightLeft, Clock, Power } from 'lucide-react';
 import { IntersectionSummary, SignalDetails } from '../types';
+import { CIVIL_LINES_SIGNALS } from '../data/civilLinesSignals';
 
 const SignalControlView: React.FC = () => {
   const [intersections, setIntersections] = useState<IntersectionSummary[]>([]);
@@ -15,10 +16,16 @@ const SignalControlView: React.FC = () => {
         try {
             const res = await fetch('http://localhost:8001/api/intersections');
             if (res.ok) {
-                const data = await res.json();
-                setIntersections(data);
-                if (!selectedId && data.length > 0) {
-                    setSelectedId(data[0].id);
+                // Replace backend list with the real map intersections
+                const mappedSignals = CIVIL_LINES_SIGNALS.map(s => ({
+                   id: s.id,
+                   name: `Intersection ${s.id}`,
+                   status: 'active'
+                })) as IntersectionSummary[];
+                
+                setIntersections(mappedSignals);
+                if (!selectedId && mappedSignals.length > 0) {
+                    setSelectedId(mappedSignals[0].id);
                 }
             }
         } catch (e) {
@@ -38,10 +45,41 @@ const SignalControlView: React.FC = () => {
               if (res.ok) {
                   const data = await res.json();
                   setDetails(data);
+                  return;
               }
           } catch (e) {
-              console.error("Failed to fetch signal details", e);
+              // Fallback to local simulation below
           }
+          
+          // Fallback mock simulation for frontend-only signals
+          setDetails(prev => {
+              const seed = parseInt(selectedId.replace(/\D/g, '')) || 0;
+              const nsT = prev?.nsGreenTime || 45 + (seed % 10);
+              const ewT = prev?.ewGreenTime || 35 + (seed % 5);
+              const aiEnabled = prev?.aiEnabled !== undefined ? prev.aiEnabled : true;
+              
+              const totalCycle = nsT + ewT;
+              const now = Math.floor(Date.now() / 1000);
+              const currentPos = now % totalCycle;
+              
+              let currentPhase = 'NS';
+              let timerRemaining = nsT - currentPos;
+              if (currentPos >= nsT) {
+                  currentPhase = 'EW';
+                  timerRemaining = totalCycle - currentPos;
+              }
+
+              return {
+                  intersectionId: selectedId,
+                  currentPhase,
+                  timerRemaining,
+                  nsGreenTime: nsT,
+                  ewGreenTime: ewT,
+                  flowRate: prev?.flowRate || 300 + (seed * 17 % 500),
+                  pedestrianDemand: prev?.pedestrianDemand || (seed % 3 === 0 ? 'High' : 'Low'),
+                  aiEnabled
+              };
+          });
       };
 
       fetchDetails();

@@ -1,7 +1,11 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Siren, AlertCircle, Clock, CheckCircle2, Navigation, MapPin, Target, Zap } from 'lucide-react';
+import { Siren, AlertCircle, Clock, CheckCircle2, Navigation, MapPin, Target, Zap, Play, ArrowRight } from 'lucide-react';
+import { MapContainer, TileLayer, CircleMarker, Polyline, Tooltip } from 'react-leaflet';
+import L from 'leaflet';
+import { CIVIL_LINES_SIGNALS } from '../data/civilLinesSignals';
+import { computeShortestPath } from '../services/routing';
 
 const activeIncidents = [
   { id: 'INC-772', type: 'Medical Emergency', unit: 'Ambulance A-202', location: 'Park St & 5th Ave', status: 'Priority 1', eta: '1m 20s', progress: 65 },
@@ -14,10 +18,63 @@ const pastIncidents = [
   { id: 'INC-758', type: 'Traffic Accident', unit: 'Tow 12', location: 'Bridgeside Dr', resolved: '1h 20m ago', result: 'Cleared' },
 ];
 
-const EmergencyView: React.FC = () => {
-  const [selectedId, setSelectedId] = useState(activeIncidents[0].id);
+interface EmergencyViewProps {
+  onDispatch?: (route: string[], type: string) => void;
+}
 
+const EmergencyView: React.FC<EmergencyViewProps> = ({ onDispatch }) => {
+  const [selectedId, setSelectedId] = useState(activeIncidents[0].id);
   const selectedIncident = activeIncidents.find(i => i.id === selectedId) || activeIncidents[0];
+
+  const [startNode, setStartNode] = useState<string | null>(null);
+  const [endNode, setEndNode] = useState<string | null>(null);
+  const [computedRoute, setComputedRoute] = useState<string[]>([]);
+  const [selectedType, setSelectedType] = useState('Medical Emergency');
+
+  const handleNodeClick = (id: string) => {
+    if (!startNode) {
+        setStartNode(id);
+    } else if (!endNode && id !== startNode) {
+        setEndNode(id);
+        const route = computeShortestPath(startNode, id);
+        setComputedRoute(route);
+    } else {
+        // Reset and start over
+        setStartNode(id);
+        setEndNode(null);
+        setComputedRoute([]);
+    }
+  };
+
+  const clearSelection = () => {
+    setStartNode(null);
+    setEndNode(null);
+    setComputedRoute([]);
+  };
+
+  const handleDispatch = () => {
+    if (startNode && endNode && computedRoute.length > 0 && onDispatch) {
+        onDispatch(computedRoute, selectedType);
+        // Add to active queue locally (dummy visual)
+        activeIncidents.unshift({
+            id: `INC-${Math.floor(Math.random() * 900) + 100}`,
+            type: selectedType,
+            unit: 'Dispatched Unit',
+            location: `${startNode} to ${endNode}`,
+            status: 'Dispatching',
+            eta: 'Calculating...',
+            progress: 0
+        });
+        setSelectedId(activeIncidents[0].id);
+        clearSelection();
+    }
+  };
+
+  // Convert route IDs back to lat/lngs for Polyline
+  const routeLatLngs = computedRoute.map(id => {
+      const s = CIVIL_LINES_SIGNALS.find(sig => sig.id === id);
+      return s ? [s.lat, s.lng] as [number, number] : null;
+  }).filter(Boolean) as [number, number][];
 
   return (
     <div className="space-y-6">
@@ -142,78 +199,116 @@ const EmergencyView: React.FC = () => {
               </div>
             </div>
 
-            {/* Simulated Simplified Map Visualization */}
+            {/* Leaflet Interactive Map */}
             <div className="flex-1 bg-[#0a0b1e] relative overflow-hidden group">
-              {/* Grid Lines */}
-              <div className="absolute inset-0 opacity-10 pointer-events-none" 
-                style={{ 
-                  backgroundImage: 'radial-gradient(circle, #334155 1px, transparent 1px)', 
-                  backgroundSize: '30px 30px' 
-                }} 
-              />
-              
-              <svg className="w-full h-full p-10" viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg">
-                {/* Simplified Road Network */}
-                <path d="M50 250H450" stroke="#1e293b" strokeWidth="30" strokeLinecap="round" />
-                <path d="M250 50V450" stroke="#1e293b" strokeWidth="30" strokeLinecap="round" />
-                <path d="M50 100H450" stroke="#1e293b" strokeWidth="15" strokeLinecap="round" opacity="0.5" />
-                <path d="M100 50V450" stroke="#1e293b" strokeWidth="15" strokeLinecap="round" opacity="0.5" />
-                
-                {/* Emergency Route Path (Highlighted) */}
-                <motion.path 
-                  initial={{ pathLength: 0 }}
-                  animate={{ pathLength: 1 }}
-                  transition={{ duration: 2, ease: "easeInOut" }}
-                  d="M50 250H250V50" 
-                  stroke="#3b82f6" 
-                  strokeWidth="8" 
-                  strokeLinecap="round" 
-                  strokeLinejoin="round" 
-                  filter="url(#glow)"
+              <MapContainer
+                center={[25.4515, 81.835]}
+                zoom={15}
+                scrollWheelZoom={true}
+                style={{ height: '100%', width: '100%', background: '#0a0b1e' }}
+                zoomControl={false}
+              >
+                <TileLayer
+                    url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
                 />
 
-                {/* Nodes / Intersections */}
-                <circle cx="250" cy="250" r="12" fill="#334155" />
-                <circle cx="50" cy="250" r="12" fill="#334155" />
-                <circle cx="250" cy="50" r="12" fill="#334155" />
+                {/* Draw Computed Route */}
+                {routeLatLngs.length > 0 && (
+                    <Polyline 
+                        positions={routeLatLngs} 
+                        color="#3b82f6" 
+                        weight={6} 
+                        opacity={0.8} 
+                        dashArray="10, 10" 
+                        className="animate-pulse" 
+                    />
+                )}
 
-                {/* Destination Marker */}
-                <motion.g animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 2 }}>
-                  <path d="M250 35L245 45H255L250 35Z" fill="#ef4444" />
-                  <circle cx="250" cy="50" r="20" stroke="#ef4444" strokeWidth="2" strokeDasharray="4 4" />
-                </motion.g>
+                {/* Draw Interactive Nodes */}
+                {CIVIL_LINES_SIGNALS.map(signal => {
+                    const isStart = signal.id === startNode;
+                    const isEnd = signal.id === endNode;
+                    const inRoute = computedRoute.includes(signal.id);
+                    
+                    let color = "#334155"; // default neutral
+                    if (isStart) color = "#10b981"; // green
+                    else if (isEnd) color = "#ef4444"; // red
+                    else if (inRoute) color = "#3b82f6"; // blue route
+                    else if (startNode && !endNode) color = "#64748b"; // selection dim
 
-                {/* Vehicle Marker */}
-                <motion.circle 
-                  animate={{ cx: [50, 250, 250], cy: [250, 250, 50] }}
-                  transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-                  r="8" 
-                  fill="#3b82f6" 
-                  filter="url(#glow)"
-                />
+                    return (
+                        <CircleMarker
+                            key={signal.id}
+                            center={[signal.lat, signal.lng]}
+                            radius={isStart || isEnd ? 12 : 8}
+                            color={color}
+                            fillColor={color}
+                            fillOpacity={inRoute ? 1 : 0.6}
+                            weight={2}
+                            eventHandlers={{ click: () => handleNodeClick(signal.id) }}
+                        >
+                            <Tooltip direction="top" offset={[0, -10]} opacity={1}>
+                                <div className="text-xs font-bold">{signal.id}</div>
+                                {isStart && <div className="text-[10px] text-emerald-500 uppercase">Origin</div>}
+                                {isEnd && <div className="text-[10px] text-red-500 uppercase">Destination</div>}
+                            </Tooltip>
+                        </CircleMarker>
+                    );
+                })}
+              </MapContainer>
 
-                {/* Signal Interlock Indicators */}
-                <circle cx="250" cy="270" r="4" fill="#10b981" />
-                <circle cx="250" cy="230" r="4" fill="#10b981" />
-                <circle cx="230" cy="250" r="4" fill="#10b981" />
-                <circle cx="270" cy="250" r="4" fill="#10b981" />
+              {/* Map Overlays & Selection Panel */}
+              <div className="absolute bottom-6 right-6 z-[1000] flex flex-col gap-3">
+                <div className="bg-slate-900/90 backdrop-blur-md p-5 rounded-xl border border-slate-700 shadow-2xl space-y-4 max-w-[280px]">
+                  <h5 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Dispatch Control</h5>
+                  
+                  <div className="space-y-3">
+                      <div>
+                          <label className="text-xs text-slate-400">Emergency Type</label>
+                          <select 
+                              className="w-full bg-slate-800 text-sm border border-slate-700 rounded-lg p-2 mt-1 focus:outline-none"
+                              value={selectedType}
+                              onChange={(e) => setSelectedType(e.target.value)}
+                          >
+                              <option>Medical Emergency</option>
+                              <option>Fire Response</option>
+                              <option>Police Pursuit</option>
+                              <option>Tactical Convoy</option>
+                          </select>
+                      </div>
 
-                <defs>
-                  <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-                    <feGaussianBlur stdDeviation="5" result="blur" />
-                    <feComposite in="SourceGraphic" in2="blur" operator="over" />
-                  </filter>
-                </defs>
-              </svg>
+                      <div className="flex items-center gap-2 text-sm justify-between bg-slate-800/50 p-2 rounded-lg border border-slate-700/50">
+                          <div className="flex flex-col items-center">
+                              <span className="text-[10px] text-slate-500 uppercase">Origin</span>
+                              <span className={`font-bold ${startNode ? 'text-emerald-400' : 'text-slate-600'}`}>
+                                  {startNode || 'Select...'}
+                              </span>
+                          </div>
+                          <ArrowRight className="text-slate-600" size={14} />
+                          <div className="flex flex-col items-center">
+                              <span className="text-[10px] text-slate-500 uppercase">Dest</span>
+                              <span className={`font-bold ${endNode ? 'text-red-400' : 'text-slate-600'}`}>
+                                  {endNode || 'Select...'}
+                              </span>
+                          </div>
+                      </div>
 
-              {/* Map Overlays */}
-              <div className="absolute bottom-6 right-6 flex flex-col gap-3">
-                <div className="bg-slate-900/80 backdrop-blur-md p-4 rounded-xl border border-slate-700 shadow-xl space-y-2 max-w-[200px]">
-                  <h5 className="text-[10px] font-bold text-slate-500 uppercase">Current Intersection</h5>
-                  <p className="text-xs font-bold text-white">Central Hub (I-104)</p>
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                    <span className="text-[10px] font-medium text-emerald-400">Priority Green Locked</span>
+                      <button 
+                          onClick={handleDispatch}
+                          disabled={!startNode || !endNode}
+                          className={`w-full py-3 rounded-xl flex items-center justify-center gap-2 text-sm font-bold shadow-lg transition-all ${
+                              startNode && endNode ? 'bg-blue-600 hover:bg-blue-500 shadow-blue-600/20 text-white' : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                          }`}
+                      >
+                          <Play size={16} />
+                          Dispatch Unit
+                      </button>
+                      
+                      {(startNode || endNode) && (
+                          <button onClick={clearSelection} className="w-full py-1 text-[10px] text-slate-500 hover:text-slate-300 uppercase tracking-widest text-center mt-2">
+                              Clear Selection
+                          </button>
+                      )}
                   </div>
                 </div>
               </div>
