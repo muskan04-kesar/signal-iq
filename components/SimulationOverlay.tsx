@@ -47,6 +47,7 @@ export const SimulationOverlay: React.FC<SimulationOverlayProps> = ({ intersecti
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const animationFrameRef = useRef<number | null>(null);
     const vehiclesRef = useRef<RoundaboutVehicle[]>([]);
+    const mousePosRef = useRef<{ x: number, y: number } | null>(null);
 
     const signalTimerRef = useRef<number>(0);
     const getRoadData = (inter: IntersectionStatus) => {
@@ -111,6 +112,13 @@ export const SimulationOverlay: React.FC<SimulationOverlayProps> = ({ intersecti
     };
 
     useMapEvents({
+        mousemove: (e) => {
+            const pt = map.latLngToContainerPoint(e.latlng);
+            mousePosRef.current = { x: pt.x, y: pt.y };
+        },
+        mouseout: () => {
+            mousePosRef.current = null;
+        },
         move: resizeCanvas,
         zoom: resizeCanvas,
         viewreset: resizeCanvas,
@@ -360,7 +368,10 @@ export const SimulationOverlay: React.FC<SimulationOverlayProps> = ({ intersecti
                 });
 
                 // HUD Label
-                if (zoom >= 17) {
+                const isHovered = mousePosRef.current && 
+                    Math.sqrt(Math.pow(mousePosRef.current.x - ix, 2) + Math.pow(mousePosRef.current.y - iy, 2)) < (circleRadius + 15 * scale);
+                
+                if (zoom >= 17 && isHovered) {
                     ctx.save();
                     ctx.translate(ix + 20 * scale, iy - 70 * scale);
                     ctx.fillStyle = 'rgba(2, 6, 23, 0.9)';
