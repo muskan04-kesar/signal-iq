@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, CircleMarker, useMapEvents, useMap, Tooltip, P
 import L from 'leaflet';
 import { IntersectionStatus, Vehicle } from '../types';
 import SimulationOverlay from './SimulationOverlay';
+import { CIVIL_LINES_EDGES } from '../data/civilLinesEdges';
 
 // Zoom Level Tracker
 const ZoomLevelTracker = ({ onChange }: { onChange: (zoom: number) => void }) => {
@@ -34,9 +35,10 @@ interface CityMapProps {
     emergencyActive: boolean;
     emergencyVehicle: any;
     onIntersectionClick: (id: string) => void;
+    showHeatmapEdges?: boolean;
 }
 
-const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyActive, emergencyVehicle, onIntersectionClick }) => {
+const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyActive, emergencyVehicle, onIntersectionClick, showHeatmapEdges = false }) => {
     const [zoom, setZoom] = useState(13);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [flyToTarget, setFlyToTarget] = useState<{ lat: number, lng: number } | null>(null);
@@ -76,7 +78,13 @@ const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyAct
     const getDensityColor = (density: number) => {
         if (density > 0.7) return '#ef4444'; // Red
         if (density > 0.4) return '#f59e0b'; // Amber
-        return '#10b981'; // Green
+        return '#3b82f6'; // Blue
+    };
+
+    const getGlowColor = (density: number) => {
+        if (density > 0.7) return 'rgba(239, 68, 68, 0.4)'; // Red glow
+        if (density > 0.4) return 'rgba(245, 158, 11, 0.4)'; // Amber glow
+        return 'rgba(59, 130, 246, 0.4)'; // Blue glow
     };
 
     // Emergency Path (Just pick a simple path from real intersections)
@@ -103,6 +111,39 @@ const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyAct
                 <ZoomLevelTracker onChange={setZoom} />
                 <MapFlyTo target={flyToTarget} />
 
+                {/* Heatmap Glowing Connections */}
+                {showHeatmapEdges && CIVIL_LINES_EDGES.map((edge, idx) => {
+                    const sourceNode = intersections.find(i => i.id === edge.source);
+                    const targetNode = intersections.find(i => i.id === edge.target);
+                    if (!sourceNode || !targetNode) return null;
+                    
+                    // The heat is the max density of the two connecting nodes
+                    const edgeDensity = Math.max(sourceNode.density || 0, targetNode.density || 0);
+                    const color = getDensityColor(edgeDensity);
+                    const glow = getGlowColor(edgeDensity);
+
+                    return (
+                        <React.Fragment key={`edge-${idx}`}>
+                            {/* Outer Glow */}
+                            <Polyline
+                                positions={[[sourceNode.lat, sourceNode.lng], [targetNode.lat, targetNode.lng]]}
+                                color={color}
+                                weight={12}
+                                opacity={0.25}
+                                interactive={false}
+                            />
+                            {/* Inner Core */}
+                            <Polyline
+                                positions={[[sourceNode.lat, sourceNode.lng], [targetNode.lat, targetNode.lng]]}
+                                color={color}
+                                weight={4}
+                                opacity={0.9}
+                                interactive={false}
+                            />
+                        </React.Fragment>
+                    );
+                })}
+
                 {/* ZOOM 12-14: Heat Circles */}
                 {zoom >= 12 && zoom <= 14 && intersections.map(inter => (
                     <CircleMarker
@@ -126,8 +167,10 @@ const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyAct
                     </CircleMarker>
                 ))}
 
-                {/* ZOOM 15-17: Glowing Nodes */}
-                {zoom >= 15 && zoom <= 17 && intersections.map(inter => (
+
+                
+                {/* ZOOM 15+: Glowing Nodes (Kept visible endlessly on Heatmap Mode) */}
+                {(zoom >= 15 && (zoom <= 17 || showHeatmapEdges)) && intersections.map(inter => (
                     <CircleMarker
                         key={inter.id}
                         center={[inter.lat, inter.lng]}
@@ -138,9 +181,6 @@ const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyAct
                         fillOpacity={0.9}
                         pathOptions={{
                             color: "#00ffa6",
-                            fillColor: "#00ffa6",
-                            fillOpacity: 0.9,
-                            weight: 2
                         }}
                         className={`leaflet-intersection-node ${selectedId === inter.id ? "selected-intersection-pulse" : ""}`}
                         eventHandlers={{
@@ -174,8 +214,8 @@ const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyAct
                     }
                 `}</style>
 
-                {/* ZOOM 17+: Detailed Simulation Layer */}
-                {zoom >= 17 && (
+                {/* ZOOM 17+: Detailed Simulation Layer (Disabled if Heatmap is isolated) */}
+                {zoom >= 17 && !showHeatmapEdges && (
                     <SimulationOverlay
                         intersections={intersections}
                         vehicles={vehicles}

@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { Map as MapIcon, Layers, Maximize2, MousePointer2, Info, Compass, Shield, Wind } from 'lucide-react';
 import { GridOverview, RoadOverview, IntersectionStatus, Vehicle } from '../types';
 import CityMap from './CityMap';
+import { CIVIL_LINES_SIGNALS } from '../data/civilLinesSignals';
 
 const LiveMapView: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -20,19 +21,22 @@ const LiveMapView: React.FC = () => {
         if (!response.ok) return;
         const data = await response.json();
 
-        const centerLat = 25.4484;
-        const centerLng = 81.8437;
-        const spacing = 0.003;
-
-        const enrichedIntersections = (data.intersections || []).map((inter: any, idx: number) => {
+        const enrichedIntersections = CIVIL_LINES_SIGNALS.map((signal, idx) => {
+          const backendNode = data.intersections?.[idx % (data.intersections?.length || 1)] || {};
           const row = Math.floor(idx / 5);
           const col = idx % 5;
           const vehicleCount = (data.vehicles || []).filter((v: any) => v.laneId.includes(String(row)) || v.laneId.includes(String(col))).length;
-          const density = Math.min(vehicleCount / 10, 1);
+          
+          // Generate a smooth simulated density heatmap curve
+          const density = Math.min((vehicleCount + (Math.sin(idx + Date.now()/10000) + 1) * 2) / 10, 1) * 0.8 + 0.1;
+
           return {
-            ...inter,
-            lat: centerLat + (row - 2) * spacing,
-            lng: centerLng + (col - 2) * spacing,
+            ...backendNode,
+            id: signal.id,
+            lat: signal.lat,
+            lng: signal.lng,
+            armAngles: signal.armAngles,
+            type: signal.armAngles?.length === 4 ? 'FOUR_WAY' : signal.armAngles?.length === 3 ? 'T' : signal.armAngles?.length > 4 ? 'ROUNDABOUT' : 'COMPLEX',
             density: density,
             aiPrediction: {
               congestionLevel: density > 0.7 ? 'CRITICAL' : density > 0.4 ? 'MODERATE' : 'STABLE',
@@ -129,6 +133,7 @@ const LiveMapView: React.FC = () => {
             emergencyActive={false}
             emergencyVehicle={null}
             onIntersectionClick={(id) => console.log('Selected', id)}
+            showHeatmapEdges={true}
           />
 
           {/* Map Controls */}
