@@ -249,7 +249,12 @@ const App: React.FC = () => {
       case 'Analytics':
         return <AnalyticsView />;
       case 'Emergency':
-        return <EmergencyView onDispatch={handleDispatchEmergency} />;
+        return <EmergencyView 
+           onDispatch={handleDispatchEmergency} 
+           isEmergencyActive={isEmergencyActive}
+           activeEmergencyRoute={activeEmergencyRoute}
+           emergencyVehiclePos={emergencyVehiclePos}
+        />;
       case 'Signal Control':
         return <SignalControlView />;
       case 'Infrastructure':

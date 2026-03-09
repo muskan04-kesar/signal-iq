@@ -20,9 +20,17 @@ const pastIncidents = [
 
 interface EmergencyViewProps {
   onDispatch?: (route: string[], type: string) => void;
+  isEmergencyActive?: boolean;
+  activeEmergencyRoute?: string[];
+  emergencyVehiclePos?: [number, number] | null;
 }
 
-const EmergencyView: React.FC<EmergencyViewProps> = ({ onDispatch }) => {
+const EmergencyView: React.FC<EmergencyViewProps> = ({ 
+    onDispatch, 
+    isEmergencyActive = false, 
+    activeEmergencyRoute = [], 
+    emergencyVehiclePos = null 
+}) => {
   const [selectedId, setSelectedId] = useState(activeIncidents[0].id);
   const selectedIncident = activeIncidents.find(i => i.id === selectedId) || activeIncidents[0];
 
@@ -70,8 +78,14 @@ const EmergencyView: React.FC<EmergencyViewProps> = ({ onDispatch }) => {
     }
   };
 
-  // Convert route IDs back to lat/lngs for Polyline
+  // Convert computed route IDs back to lat/lngs for preview Polyline
   const routeLatLngs = computedRoute.map(id => {
+      const s = CIVIL_LINES_SIGNALS.find(sig => sig.id === id);
+      return s ? [s.lat, s.lng] as [number, number] : null;
+  }).filter(Boolean) as [number, number][];
+
+  // Convert active route IDs back to lat/lngs for live Polyline
+  const activeRouteLatLngs = activeEmergencyRoute.map(id => {
       const s = CIVIL_LINES_SIGNALS.find(sig => sig.id === id);
       return s ? [s.lat, s.lng] as [number, number] : null;
   }).filter(Boolean) as [number, number][];
@@ -212,11 +226,22 @@ const EmergencyView: React.FC<EmergencyViewProps> = ({ onDispatch }) => {
                     url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
                 />
 
-                {/* Draw Computed Route */}
-                {routeLatLngs.length > 0 && (
+                {/* Draw Computed Route (Preview) */}
+                {routeLatLngs.length > 0 && !isEmergencyActive && (
                     <Polyline 
                         positions={routeLatLngs} 
                         color="#3b82f6" 
+                        weight={6} 
+                        opacity={0.8} 
+                        dashArray="10, 10" 
+                    />
+                )}
+
+                {/* Draw Active Emergency Route */}
+                {isEmergencyActive && activeRouteLatLngs.length > 0 && (
+                    <Polyline 
+                        positions={activeRouteLatLngs} 
+                        color="#ef4444" 
                         weight={6} 
                         opacity={0.8} 
                         dashArray="10, 10" 
@@ -224,16 +249,41 @@ const EmergencyView: React.FC<EmergencyViewProps> = ({ onDispatch }) => {
                     />
                 )}
 
+                {/* Draw Emergency Vehicle Marker */}
+                {isEmergencyActive && emergencyVehiclePos && (
+                    <>
+                        <CircleMarker
+                            center={emergencyVehiclePos}
+                            radius={8}
+                            color="#ffffff"
+                            fillColor="#ef4444"
+                            weight={2}
+                            fillOpacity={1}
+                            className="leaflet-emergency-marker-ev"
+                        />
+                        <style>{`
+                            .leaflet-emergency-marker-ev {
+                                filter: drop-shadow(0 0 10px #ef4444);
+                                animation: strobe-ev 0.5s infinite alternate;
+                            }
+                            @keyframes strobe-ev {
+                                from { filter: drop-shadow(0 0 10px #ef4444); opacity: 0.9; fill: #ef4444; }
+                                to { filter: drop-shadow(0 0 20px #3b82f6); opacity: 1; fill: #3b82f6; }
+                            }
+                        `}</style>
+                    </>
+                )}
+
                 {/* Draw Interactive Nodes */}
                 {CIVIL_LINES_SIGNALS.map(signal => {
                     const isStart = signal.id === startNode;
                     const isEnd = signal.id === endNode;
-                    const inRoute = computedRoute.includes(signal.id);
+                    const inRoute = isEmergencyActive ? activeEmergencyRoute.includes(signal.id) : computedRoute.includes(signal.id);
                     
                     let color = "#334155"; // default neutral
                     if (isStart) color = "#10b981"; // green
                     else if (isEnd) color = "#ef4444"; // red
-                    else if (inRoute) color = "#3b82f6"; // blue route
+                    else if (inRoute) color = isEmergencyActive ? "#ef4444" : "#3b82f6"; // route color
                     else if (startNode && !endNode) color = "#64748b"; // selection dim
 
                     return (
@@ -295,13 +345,13 @@ const EmergencyView: React.FC<EmergencyViewProps> = ({ onDispatch }) => {
 
                       <button 
                           onClick={handleDispatch}
-                          disabled={!startNode || !endNode}
+                          disabled={!startNode || !endNode || isEmergencyActive}
                           className={`w-full py-3 rounded-xl flex items-center justify-center gap-2 text-sm font-bold shadow-lg transition-all ${
-                              startNode && endNode ? 'bg-blue-600 hover:bg-blue-500 shadow-blue-600/20 text-white' : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                              startNode && endNode && !isEmergencyActive ? 'bg-blue-600 hover:bg-blue-500 shadow-blue-600/20 text-white' : 'bg-slate-800 text-slate-500 cursor-not-allowed'
                           }`}
                       >
                           <Play size={16} />
-                          Dispatch Unit
+                          {isEmergencyActive ? 'Unit En Route...' : 'Dispatch Unit'}
                       </button>
                       
                       {(startNode || endNode) && (
