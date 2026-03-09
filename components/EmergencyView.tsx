@@ -251,27 +251,15 @@ const EmergencyView: React.FC<EmergencyViewProps> = ({
 
                 {/* Draw Emergency Vehicle Marker */}
                 {isEmergencyActive && emergencyVehiclePos && (
-                    <>
-                        <CircleMarker
-                            center={emergencyVehiclePos}
-                            radius={8}
-                            color="#ffffff"
-                            fillColor="#ef4444"
-                            weight={2}
-                            fillOpacity={1}
-                            className="leaflet-emergency-marker-ev"
-                        />
-                        <style>{`
-                            .leaflet-emergency-marker-ev {
-                                filter: drop-shadow(0 0 10px #ef4444);
-                                animation: strobe-ev 0.5s infinite alternate;
-                            }
-                            @keyframes strobe-ev {
-                                from { filter: drop-shadow(0 0 10px #ef4444); opacity: 0.9; fill: #ef4444; }
-                                to { filter: drop-shadow(0 0 20px #3b82f6); opacity: 1; fill: #3b82f6; }
-                            }
-                        `}</style>
-                    </>
+                    <CircleMarker
+                        center={emergencyVehiclePos}
+                        radius={8}
+                        color="#ffffff"
+                        fillColor="#ef4444"
+                        weight={2}
+                        fillOpacity={1}
+                        className="leaflet-emergency-marker-ev"
+                    />
                 )}
 
                 {/* Draw Interactive Nodes */}
@@ -306,6 +294,17 @@ const EmergencyView: React.FC<EmergencyViewProps> = ({
                     );
                 })}
               </MapContainer>
+
+              <style>{`
+                  .leaflet-emergency-marker-ev {
+                      filter: drop-shadow(0 0 10px #ef4444);
+                      animation: strobe-ev 0.5s infinite alternate;
+                  }
+                  @keyframes strobe-ev {
+                      from { filter: drop-shadow(0 0 10px #ef4444); opacity: 0.9; fill: #ef4444; }
+                      to { filter: drop-shadow(0 0 20px #3b82f6); opacity: 1; fill: #3b82f6; }
+                  }
+              `}</style>
 
               {/* Map Overlays & Selection Panel */}
               <div className="absolute bottom-6 right-6 z-[1000] flex flex-col gap-3">

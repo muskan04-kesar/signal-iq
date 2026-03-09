@@ -51,22 +51,27 @@ const App: React.FC = () => {
   // Custom Local Dispatch State
   const [activeEmergencyRoute, setActiveEmergencyRoute] = useState<string[]>([]);
   const [emergencyVehiclePos, setEmergencyVehiclePos] = useState<[number, number] | null>(null);
-  const [emergencySegmentIndex, setEmergencySegmentIndex] = useState(0);
 
-  const handleDispatchEmergency = (route: string[], type: string) => {
+  const handleDispatchEmergency = async (route: string[], type: string) => {
+      // Optimistic UI state
       setActiveEmergencyRoute(route);
-      setEmergencySegmentIndex(0);
       setEmergencyActive(true);
+      
       const startNode = CIVIL_LINES_SIGNALS.find(s => s.id === route[0]);
       if (startNode) {
           setEmergencyVehiclePos([startNode.lat, startNode.lng]);
       }
       
-      // Notify backend strictly for analytics/switch logs
-      fetch(`http://localhost:8001/api/emergency/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      }).catch(e => console.error("Failed to start emergency", e));
+      // Notify backend to spin up true simulation
+      try {
+        await fetch(`http://localhost:8001/api/emergency/dispatch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ route, type })
+        });
+      } catch (e) {
+        console.error("Failed to post emergency dispatch", e);
+      }
   };
 
   const [osmSignals, setOsmSignals] = useState<Partial<IntersectionStatus>[]>(CIVIL_LINES_SIGNALS as any[]);
@@ -86,8 +91,8 @@ const App: React.FC = () => {
 
         // Enrich intersections with coordinates and density
         // Backend returns ~25 nodes, we map them directly to our cached signals
-        const enrichedIntersections = osmSignalsRef.current.map((osmNode: any, idx: number) => {
-          const interData = (data.intersections || [])[idx] || {};
+        const enrichedIntersections = osmSignalsRef.current.map((osmNode: any) => {
+          const interData = (data.intersections || []).find((i: any) => i.id === osmNode.id) || {};
 
           // Estimate density if vehicles data is passed
           // Just a proxy to avoid breaking physics Engine
@@ -95,15 +100,18 @@ const App: React.FC = () => {
 
           return {
             ...interData,
-            id: osmNode.id || interData.id || `osm-${idx}`,
+            id: osmNode.id,
             lat: osmNode.lat, 
             lng: osmNode.lng,
             type: osmNode.type || 'TRAFFIC_SIGNAL',
             connections: osmNode.connections || 4,
             armAngles: osmNode.armAngles,
-            congestionScore: osmNode.congestionScore || density, // mapping density to expected variable
-            density: density,
-            aiPrediction: {
+            // NATIVE: Backend now controls this data natively instead of fake mapped values
+            congestionScore: interData.congestionScore || density, 
+            density: interData.density || density,
+            nsSignal: interData.nsSignal || 'RED',
+            ewSignal: interData.ewSignal || 'GREEN',
+            aiPrediction: interData.aiPrediction || {
               congestionLevel: density > 0.7 ? 'CRITICAL' : density > 0.4 ? 'MODERATE' : 'STABLE',
               flowImprovement: density > 0.5 ? '+14%' : 'N/A'
             }
@@ -131,26 +139,28 @@ const App: React.FC = () => {
           }
 
           setEmergencyActive(data.emergency.active);
+          
+          // BACKEND NATIVE: Accept the real route and true position from physics engine
+          if (data.emergency.route) setActiveEmergencyRoute(data.emergency.route);
+          if (data.emergency.lat !== undefined && data.emergency.lng !== undefined) {
+             setEmergencyVehiclePos([data.emergency.lat, data.emergency.lng]);
+          }
+          
           setEmergencyVehicle({
-            id: 'EMG-1',
-            laneId: data.emergency.laneId,
-            position: data.emergency.position,
-            speed: data.emergency.speed,
+            id: data.emergency.vehicleId || 'EMG-1',
             type: 'emergency',
             active: data.emergency.active
           });
         } else {
+          // No emergency currently tracking
           setEmergencyActive(false);
+          setActiveEmergencyRoute([]);
 
-          // If we currently have a vehicle and no timeout is active, start persistence timer
-          // We can't check 'emergencyVehicle' state directly here due to closure staleness,
-          // so we rely on the fact that if we had one, the user sees it, and we want to keep it.
-          // But simpler: just set the timeout. If it was already null, setting it to null again in 2s is fine.
-          // Crucially, we do NOT set it to null immediately here.
-
-          if (!emergencyTimeoutRef.current) {
+          // Linger visual briefly before erasing
+          if (!emergencyTimeoutRef.current && emergencyVehiclePos) {
             emergencyTimeoutRef.current = setTimeout(() => {
               setEmergencyVehicle(null);
+              setEmergencyVehiclePos(null);
               emergencyTimeoutRef.current = null;
             }, 2000);
           }
@@ -173,65 +183,7 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // Emergency Vehicle Routing Telemetry Loop
-  useEffect(() => {
-    if (!isEmergencyActive || activeEmergencyRoute.length < 2) return;
-
-    let currentSegmentIndex = 0;
-    let progress = 0; // 0 to 1
-    const speed = 0.05; // 5% per frame (faster simulated driving)
-
-    const interval = setInterval(() => {
-        progress += speed;
-
-        if (progress >= 1) {
-            currentSegmentIndex++;
-            setEmergencySegmentIndex(currentSegmentIndex);
-            progress = 0;
-            if (currentSegmentIndex >= activeEmergencyRoute.length - 1) {
-                // Reached destination!
-                clearInterval(interval);
-                setTimeout(() => {
-                    setEmergencyActive(false);
-                    setActiveEmergencyRoute([]);
-                    setEmergencyVehiclePos(null);
-                    fetch(`http://localhost:8001/api/emergency/stop`, { method: 'POST' }).catch(() => {});
-                }, 4000); // Linger on destination before clearing
-                return;
-            }
-        }
-
-        const s1 = CIVIL_LINES_SIGNALS.find(s => s.id === activeEmergencyRoute[currentSegmentIndex]);
-        const s2 = CIVIL_LINES_SIGNALS.find(s => s.id === activeEmergencyRoute[currentSegmentIndex + 1]);
-
-        if (s1 && s2) {
-            const lat = s1.lat + (s2.lat - s1.lat) * progress;
-            const lng = s1.lng + (s2.lng - s1.lng) * progress;
-            setEmergencyVehiclePos([lat, lng]);
-        }
-    }, 100); // 10 ticks per second
-
-    return () => clearInterval(interval);
-  }, [isEmergencyActive, activeEmergencyRoute]);
-
-  // Apply preemption logic for active emergency routes
-  const displayIntersections = intersections.map(inter => {
-      if (isEmergencyActive && activeEmergencyRoute.length > 0) {
-          const isPreempted = inter.id === activeEmergencyRoute[emergencySegmentIndex] || 
-                              inter.id === activeEmergencyRoute[emergencySegmentIndex + 1];
-          if (isPreempted) {
-              return { 
-                  ...inter, 
-                  nsSignal: 'GREEN' as const, 
-                  ewSignal: 'GREEN' as const,
-                  congestionScore: 0.1 // Force visual clear
-              };
-          }
-      }
-      return inter;
-  });
-
-  const selectedInter = displayIntersections.find(i => i.id === selectedIntersectionId) || displayIntersections[0];
+  const selectedInter = intersections.find(i => i.id === selectedIntersectionId) || intersections[0];
 
   if (intersections.length === 0) {
     return (
@@ -286,7 +238,7 @@ const App: React.FC = () => {
                   </div>
 
                   <CityMap 
-                      intersections={displayIntersections} 
+                      intersections={intersections} 
                       vehicles={vehicles} 
                       emergencyActive={isEmergencyActive} 
                       emergencyVehicle={emergencyVehicle} 

@@ -199,20 +199,6 @@ const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyAct
                     </CircleMarker>
                 ))}
 
-                <style>{`
-                    .leaflet-intersection-node {
-                        filter: drop-shadow(0 0 6px #00ffa6);
-                    }
-                    .selected-intersection-pulse {
-                        filter: drop-shadow(0 0 12px #3b82f6);
-                        stroke-width: 4px;
-                        animation: active-glow 2s infinite alternate;
-                    }
-                    @keyframes active-glow {
-                        from { filter: drop-shadow(0 0 8px #3b82f6); opacity: 0.8; }
-                        to { filter: drop-shadow(0 0 20px #3b82f6); opacity: 1; }
-                    }
-                `}</style>
 
                 {/* ZOOM 17+: Detailed Simulation Layer (Disabled if Heatmap is isolated) */}
                 {zoom >= 17 && !showHeatmapEdges && (
@@ -246,19 +232,33 @@ const CityMap: React.FC<CityMapProps> = ({ intersections, vehicles, emergencyAct
                                 className="leaflet-emergency-marker"
                             />
                         )}
-                        <style>{`
-                            .leaflet-emergency-marker {
-                                filter: drop-shadow(0 0 10px #3b82f6);
-                                animation: strobe 0.5s infinite alternate;
-                            }
-                            @keyframes strobe {
-                                from { filter: drop-shadow(0 0 10px #3b82f6); opacity: 0.9; fill: #3b82f6; }
-                                to { filter: drop-shadow(0 0 20px #ef4444); opacity: 1; fill: #ef4444; }
-                            }
-                        `}</style>
                     </>
                 )}
             </MapContainer>
+
+            <style>{`
+                .leaflet-intersection-node {
+                    filter: drop-shadow(0 0 6px #00ffa6);
+                }
+                .selected-intersection-pulse {
+                    filter: drop-shadow(0 0 12px #3b82f6);
+                    stroke-width: 4px;
+                    animation: active-glow 2s infinite alternate;
+                }
+                @keyframes active-glow {
+                    from { filter: drop-shadow(0 0 8px #3b82f6); opacity: 0.8; }
+                    to { filter: drop-shadow(0 0 20px #3b82f6); opacity: 1; }
+                }
+                
+                .leaflet-emergency-marker {
+                    filter: drop-shadow(0 0 10px #3b82f6);
+                    animation: strobe 0.5s infinite alternate;
+                }
+                @keyframes strobe {
+                    from { filter: drop-shadow(0 0 10px #3b82f6); opacity: 0.9; fill: #3b82f6; }
+                    to { filter: drop-shadow(0 0 20px #ef4444); opacity: 1; fill: #ef4444; }
+                }
+            `}</style>
 
             {/* Float Info */}
             <div className="absolute top-4 right-4 z-[1000] bg-slate-900/90 p-3 rounded-xl border border-slate-700 backdrop-blur-md">

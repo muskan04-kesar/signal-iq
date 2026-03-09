@@ -49,7 +49,6 @@ export const SimulationOverlay: React.FC<SimulationOverlayProps> = ({ intersecti
     const vehiclesRef = useRef<RoundaboutVehicle[]>([]);
     const mousePosRef = useRef<{ x: number, y: number } | null>(null);
 
-    const signalTimerRef = useRef<number>(0);
     const getRoadData = (inter: IntersectionStatus) => {
         const isRoundabout = inter.type === 'ROUNDABOUT';
         let armAngles = [0, 90, 180, 270]; // Default FOUR_WAY
@@ -152,17 +151,6 @@ export const SimulationOverlay: React.FC<SimulationOverlayProps> = ({ intersecti
             const isHighZoom = zoom >= 17;
 
             // --- 1. Map Mask Layer (Fade background tiles) removed per user request to preserve map brightness ---
-
-            // --- 2. Signal Logic ---
-            signalTimerRef.current += 1;
-            const getSignalInfo = (index: number) => {
-                const cycleTime = 600;
-                const offset = index * (cycleTime / 6);
-                const localTime = (signalTimerRef.current + offset) % cycleTime;
-                if (localTime < cycleTime * 0.6) return 'RED';
-                if (localTime < cycleTime * 0.7) return 'YELLOW';
-                return 'GREEN';
-            };
 
             // --- 2. Per-Intersection Rendering ---
             intersections.forEach(inter => {
@@ -350,7 +338,11 @@ export const SimulationOverlay: React.FC<SimulationOverlayProps> = ({ intersecti
                     // Signal Indicator
                     const sigDist = circleRadius + (isHighZoom ? 25 * scale : 35 * scale);
                     const sigPt = samplePolyline(pts, sigDist / totalLen || 0.2);
-                    const state = getSignalInfo(i);
+                    
+                    let rawStateStr: string = (i % 2 === 0) ? (inter.nsSignal || 'RED') : (inter.ewSignal || 'GREEN');
+                    if (rawStateStr === 'EMERGENCY_OVERRIDE') rawStateStr = 'GREEN';
+                    const state = rawStateStr;
+
                     ctx.fillStyle = '#1e293b';
                     ctx.fillRect(sigPt.x - 4 * scale, sigPt.y - 18 * scale, 8 * scale, 18 * scale);
 
@@ -428,7 +420,9 @@ export const SimulationOverlay: React.FC<SimulationOverlayProps> = ({ intersecti
                 // An exiting vehicle travels from t=0.1 to t=1
 
                 const armLen = arm.length * scale || 150 * scale;
-                const sigState = getSignalInfo(v.startArmIndex);
+                let rawStateStr: string = (v.startArmIndex % 2 === 0) ? (inter.nsSignal || 'RED') : (inter.ewSignal || 'GREEN');
+                if (rawStateStr === 'EMERGENCY_OVERRIDE') rawStateStr = 'GREEN';
+                const sigState = rawStateStr;
 
                 if (v.pathType === 'entry') {
                     if (v.progress > 0.65 && v.progress < 0.7 && sigState === 'RED') return v;
