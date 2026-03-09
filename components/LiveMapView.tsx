@@ -28,13 +28,11 @@ const LiveMapView: React.FC<LiveMapViewProps> = ({ isEmergencyActive = false, ac
         const data = await response.json();
 
         const enrichedIntersections = CIVIL_LINES_SIGNALS.map((signal, idx) => {
-          const backendNode = data.intersections?.[idx % (data.intersections?.length || 1)] || {};
-          const row = Math.floor(idx / 5);
-          const col = idx % 5;
-          const vehicleCount = (data.vehicles || []).filter((v: any) => v.laneId.includes(String(row)) || v.laneId.includes(String(col))).length;
+          const backendNode = (data.intersections || []).find((i: any) => i.id === signal.id) || {};
+          const vehicleCount = (data.vehicles || []).filter((v: any) => v.edge_source === signal.id || v.edge_target === signal.id).length;
           
-          // Generate a smooth simulated density heatmap curve
-          const density = Math.min((vehicleCount + (Math.sin(idx + Date.now()/10000) + 1) * 2) / 10, 1) * 0.8 + 0.1;
+          // Generate an amplified estimated density for the heatmap based on active vehicles
+          const density = Math.min((vehicleCount * 0.15) + ((backendNode.density || 0) * 0.8), 1) * 0.8 + 0.1;
 
           return {
             ...backendNode,
@@ -44,7 +42,7 @@ const LiveMapView: React.FC<LiveMapViewProps> = ({ isEmergencyActive = false, ac
             armAngles: signal.armAngles,
             type: signal.armAngles?.length === 4 ? 'FOUR_WAY' : signal.armAngles?.length === 3 ? 'T' : signal.armAngles?.length > 4 ? 'ROUNDABOUT' : 'COMPLEX',
             density: density,
-            aiPrediction: {
+            aiPrediction: backendNode.aiPrediction || {
               congestionLevel: density > 0.7 ? 'CRITICAL' : density > 0.4 ? 'MODERATE' : 'STABLE',
               flowImprovement: density > 0.5 ? '+14%' : 'N/A'
             }
