@@ -1,22 +1,11 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Siren, AlertCircle, Clock, CheckCircle2, Navigation, MapPin, Target, Zap, Play, ArrowRight } from 'lucide-react';
 import { MapContainer, TileLayer, CircleMarker, Polyline, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 import { CIVIL_LINES_SIGNALS } from '../data/civilLinesSignals';
 import { computeShortestPath } from '../services/routing';
-
-const activeIncidents = [
-  { id: 'INC-772', type: 'Medical Emergency', unit: 'Ambulance A-202', location: 'Park St & 5th Ave', status: 'Priority 1', eta: '1m 20s', progress: 65 },
-  { id: 'INC-781', type: 'Fire Response', unit: 'Engine 42', location: 'Industrial Zone', status: 'En Route', eta: '4m 45s', progress: 30 },
-];
-
-const pastIncidents = [
-  { id: 'INC-765', type: 'Police Pursuit', unit: 'Unit 9', location: 'Highway 10', resolved: '15m ago', result: 'Cleared' },
-  { id: 'INC-760', type: 'Medical Emergency', unit: 'Ambulance B-10', location: 'MG Road', resolved: '42m ago', result: 'Success' },
-  { id: 'INC-758', type: 'Traffic Accident', unit: 'Tow 12', location: 'Bridgeside Dr', resolved: '1h 20m ago', result: 'Cleared' },
-];
 
 interface EmergencyViewProps {
   onDispatch?: (route: string[], type: string) => void;
@@ -31,8 +20,34 @@ const EmergencyView: React.FC<EmergencyViewProps> = ({
     activeEmergencyRoute = [], 
     emergencyVehiclePos = null 
 }) => {
-  const [selectedId, setSelectedId] = useState(activeIncidents[0].id);
+  const [activeIncidents, setActiveIncidents] = useState<any[]>([]);
+  const [pastIncidentsList, setPastIncidentsList] = useState<any[]>([
+    { id: 'INC-765', type: 'Police Pursuit', unit: 'Unit 9', location: 'Highway 10', resolved: '15m ago', result: 'Cleared' },
+    { id: 'INC-760', type: 'Medical Emergency', unit: 'Ambulance B-10', location: 'MG Road', resolved: '42m ago', result: 'Success' },
+    { id: 'INC-758', type: 'Traffic Accident', unit: 'Tow 12', location: 'Bridgeside Dr', resolved: '1h 20m ago', result: 'Cleared' },
+  ]);
+
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const selectedIncident = activeIncidents.find(i => i.id === selectedId) || activeIncidents[0];
+
+  const prevEmergencyActive = useRef(isEmergencyActive);
+
+  useEffect(() => {
+    if (prevEmergencyActive.current && !isEmergencyActive && activeIncidents.length > 0) {
+      const finished = activeIncidents[0];
+      setPastIncidentsList(prev => [{
+        id: finished.id,
+        type: finished.type,
+        unit: finished.unit,
+        location: finished.location,
+        resolved: 'Just now',
+        result: 'Success'
+      }, ...prev]);
+      setActiveIncidents([]);
+      setSelectedId(null);
+    }
+    prevEmergencyActive.current = isEmergencyActive;
+  }, [isEmergencyActive, activeIncidents]);
 
   const [startNode, setStartNode] = useState<string | null>(null);
   const [endNode, setEndNode] = useState<string | null>(null);
@@ -63,8 +78,7 @@ const EmergencyView: React.FC<EmergencyViewProps> = ({
   const handleDispatch = () => {
     if (startNode && endNode && computedRoute.length > 0 && onDispatch) {
         onDispatch(computedRoute, selectedType);
-        // Add to active queue locally (dummy visual)
-        activeIncidents.unshift({
+        const newIncident = {
             id: `INC-${Math.floor(Math.random() * 900) + 100}`,
             type: selectedType,
             unit: 'Dispatched Unit',
@@ -72,8 +86,9 @@ const EmergencyView: React.FC<EmergencyViewProps> = ({
             status: 'Dispatching',
             eta: 'Calculating...',
             progress: 0
-        });
-        setSelectedId(activeIncidents[0].id);
+        };
+        setActiveIncidents([newIncident]);
+        setSelectedId(newIncident.id);
         clearSelection();
     }
   };
@@ -174,7 +189,7 @@ const EmergencyView: React.FC<EmergencyViewProps> = ({
             Response Log
           </h3>
           <div className="bg-slate-900/40 border border-slate-700/50 rounded-2xl p-4 divide-y divide-slate-800">
-            {pastIncidents.map((incident) => (
+            {pastIncidentsList.map((incident) => (
               <div key={incident.id} className="py-3 first:pt-0 last:pb-0">
                 <div className="flex justify-between items-start mb-1">
                   <span className="text-xs font-bold text-white">{incident.type}</span>
@@ -203,7 +218,7 @@ const EmergencyView: React.FC<EmergencyViewProps> = ({
                   <Zap size={16} />
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-white">{selectedIncident.unit} Pathing</h4>
+                  <h4 className="text-sm font-bold text-white">{selectedIncident ? selectedIncident.unit : 'No Active Unit'} Pathing</h4>
                   <p className="text-[10px] text-slate-400">Real-time SignalIQ Override Enabled</p>
                 </div>
               </div>
