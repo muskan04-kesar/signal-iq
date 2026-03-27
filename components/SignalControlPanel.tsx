@@ -16,7 +16,7 @@ const SignalControlPanel: React.FC<SignalControlPanelProps> = ({ intersection, a
   React.useEffect(() => {
     const fetchSignalConfig = async () => {
       try {
-        const res = await fetch(`http://localhost:8001/api/signals/${intersection.id}`);
+        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/signals/${intersection.id}`);
         if (res.ok) {
           const data = await res.json();
           setNsGreenTime(data.nsGreenTime || 30);
@@ -46,7 +46,7 @@ const SignalControlPanel: React.FC<SignalControlPanelProps> = ({ intersection, a
     // I will simply call the API.
     
     try {
-      await fetch(`http://localhost:8001/api/signals/${intersection.id}/update`, {
+      await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/signals/${intersection.id}/update`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

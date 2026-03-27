@@ -25,7 +25,7 @@ const App: React.FC = () => {
 
   const handleSetAiEnabled = (enabled: boolean) => {
     setAiEnabled(enabled);
-    fetch('http://localhost:8001/api/signals/ai', {
+    fetch(`${import.meta.env.VITE_API_BASE_URL}/api/signals/ai`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled, scope: "GLOBAL" })
@@ -35,7 +35,7 @@ const App: React.FC = () => {
   const handleSetEmergencyActive = (active: boolean) => {
     setEmergencyActive(active);
     const endpoint = active ? 'start' : 'stop';
-    fetch(`http://localhost:8001/api/emergency/${endpoint}`, {
+    fetch(`${import.meta.env.VITE_API_BASE_URL}/api/emergency/${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
     }).catch(e => console.error(`Failed to ${endpoint} emergency`, e));
@@ -64,7 +64,7 @@ const App: React.FC = () => {
       
       // Notify backend to spin up true simulation
       try {
-        await fetch(`http://localhost:8001/api/emergency/dispatch`, {
+        await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/emergency/dispatch`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ route, type })
@@ -85,7 +85,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const fetchGridState = async () => {
       try {
-        const response = await fetch('http://localhost:8001/api/grid/state');
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/grid/state`);
         if (!response.ok) return;
         const data = await response.json();
 
@@ -127,7 +127,7 @@ const App: React.FC = () => {
 
     const fetchEmergencyState = async () => {
       try {
-        const response = await fetch('http://localhost:8001/api/emergency/state');
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/emergency/state`);
         if (!response.ok) return;
         const data = await response.json();
 

@@ -14,7 +14,7 @@ const SignalControlView: React.FC = () => {
   useEffect(() => {
     const fetchIntersections = async () => {
         try {
-            const res = await fetch('http://localhost:8001/api/intersections');
+            const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/intersections`);
             if (res.ok) {
                 // Replace backend list with the real map intersections
                 const mappedSignals = CIVIL_LINES_SIGNALS.map(s => ({
@@ -41,7 +41,7 @@ const SignalControlView: React.FC = () => {
 
       const fetchDetails = async () => {
           try {
-              const res = await fetch(`http://localhost:8001/api/signals/${selectedId}`);
+              const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/signals/${selectedId}`);
               if (res.ok) {
                   const data = await res.json();
                   setDetails(data);
@@ -98,7 +98,7 @@ const SignalControlView: React.FC = () => {
       }) : null);
 
       try {
-          await fetch(`http://localhost:8001/api/signals/${selectedId}/update`, {
+          await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/signals/${selectedId}/update`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -120,7 +120,7 @@ const SignalControlView: React.FC = () => {
       setDetails(prev => prev ? ({ ...prev, aiEnabled: newAiState }) : null);
 
       try {
-          await fetch(`http://localhost:8001/api/signals/${selectedId}/update`, {
+          await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/signals/${selectedId}/update`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -140,14 +140,14 @@ const SignalControlView: React.FC = () => {
   const handleBulkOptimize = async () => {
     setIsOptimizing(true);
     try {
-        const res = await fetch('http://localhost:8001/api/signals/optimize-all', {
+        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/signals/optimize-all`, {
             method: 'POST'
         });
         if (res.ok) {
             setSuccessMsg('Global AI Optimization Applied');
              // Force refresh details if selected
               if (selectedId) {
-                  const detailsRes = await fetch(`http://localhost:8001/api/signals/${selectedId}`);
+                  const detailsRes = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/signals/${selectedId}`);
                   if (detailsRes.ok) {
                       const data = await detailsRes.json();
                       setDetails(data);
@@ -175,7 +175,7 @@ const SignalControlView: React.FC = () => {
       if (!apiPattern) return;
 
       try {
-          const res = await fetch('http://localhost:8001/api/signals/pattern', {
+          const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/signals/pattern`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ pattern: apiPattern })
@@ -186,7 +186,7 @@ const SignalControlView: React.FC = () => {
               
               // Force refresh details if selected
               if (selectedId) {
-                  const detailsRes = await fetch(`http://localhost:8001/api/signals/${selectedId}`);
+                  const detailsRes = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/signals/${selectedId}`);
                   if (detailsRes.ok) {
                       const data = await detailsRes.json();
                       setDetails(data);

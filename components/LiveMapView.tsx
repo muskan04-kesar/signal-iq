@@ -23,7 +23,7 @@ const LiveMapView: React.FC<LiveMapViewProps> = ({ isEmergencyActive = false, ac
   useEffect(() => {
     const fetchGridState = async () => {
       try {
-        const response = await fetch('http://localhost:8001/api/grid/state');
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/grid/state`);
         if (!response.ok) return;
         const data = await response.json();
 
@@ -79,7 +79,7 @@ const LiveMapView: React.FC<LiveMapViewProps> = ({ isEmergencyActive = false, ac
   useEffect(() => {
     const fetchOverview = async () => {
       try {
-        const res = await fetch('http://localhost:8001/api/grid/overview');
+        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/grid/overview`);
         if (res.ok) {
           const data = await res.json();
           setGridOverview(data);

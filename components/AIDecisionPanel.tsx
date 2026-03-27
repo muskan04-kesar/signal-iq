@@ -17,7 +17,7 @@ const AIDecisionPanel: React.FC<AIDecisionPanelProps> = ({ aiEnabled, onApply })
   React.useEffect(() => {
     const fetchAIStatus = async () => {
         try {
-            const res = await fetch('http://localhost:8001/api/ai/status');
+            const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/ai/status`);
             if (res.ok) {
                 const data = await res.json();
                 setAiData(data);
