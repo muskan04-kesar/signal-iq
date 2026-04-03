@@ -25,17 +25,7 @@ Frontend → Backend → Database
          ↓
       AI Engine (Traffic Optimization)
 
-🚀 Getting Started
-git clone https://github.com/your-username/signaliq.git
-cd signaliq
-npm install
-
-# Run backend
-npm run server
-
-# Run frontend
-npm start
-🎯 Use Case
+Find the link of the backend repo here at : https://github.com/muskan04-kesar/signal-iq-backend-.git
 
 SignalIQ helps cities and smart infrastructure systems:
 
@@ -43,11 +33,10 @@ Reduce traffic congestion
 Optimize signal timings dynamically
 Improve travel time efficiency
 Support smart city initiatives
+
 🔮 Future Scope
 Integration with live CCTV feeds
 Reinforcement learning for signal control
 Emergency vehicle prioritization
 City-wide traffic coordination system
-🤝 Contribution
 
-Contributions are welcome. Open an issue to discuss major changes.
