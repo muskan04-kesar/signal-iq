@@ -35,6 +35,7 @@ Improve travel time efficiency
 Support smart city initiatives
 
 🔮 Future Scope
+
 Integration with live CCTV feeds
 Reinforcement learning for signal control
 Emergency vehicle prioritization
