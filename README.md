@@ -1,20 +1,53 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+🚦 SignalIQ — AI-Powered Traffic Optimization System
 
-# Run and deploy your AI Studio app
+SignalIQ is an intelligent traffic management system that uses AI to analyze real-time traffic conditions and optimize signal timings to reduce congestion and improve flow efficiency.
 
-This contains everything you need to run your app locally.
+⚡ Features
+🚗 Real-Time Traffic Analysis
+Processes live or simulated traffic data (vehicle density, flow rate)
+🤖 AI-Based Optimization
+Dynamically adjusts traffic signal timings using ML models
+🚦 Adaptive Signal Control
+Reduces wait time and congestion at intersections
+📊 Smart Dashboard
+Visualizes traffic patterns, congestion levels, and signal states
+🔔 Event Detection
+Identifies unusual traffic conditions (e.g., heavy congestion spikes)
+🏗️ Tech Stack
+Frontend: React.js
+Backend: Node.js + Express.js
+Database: MongoDB
+AI/ML: Python (traffic prediction & optimization models)
+Deployment: Vercel / Render
+🧩 Architecture
 
-View your app in AI Studio: https://ai.studio/apps/drive/1pEYlRkcN1O39dSz650WYLegTM2CEqE6B
+Frontend → Backend → Database
+         ↓
+      AI Engine (Traffic Optimization)
 
-## Run Locally
+🚀 Getting Started
+git clone https://github.com/your-username/signaliq.git
+cd signaliq
+npm install
 
-**Prerequisites:**  Node.js
+# Run backend
+npm run server
 
+# Run frontend
+npm start
+🎯 Use Case
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+SignalIQ helps cities and smart infrastructure systems:
+
+Reduce traffic congestion
+Optimize signal timings dynamically
+Improve travel time efficiency
+Support smart city initiatives
+🔮 Future Scope
+Integration with live CCTV feeds
+Reinforcement learning for signal control
+Emergency vehicle prioritization
+City-wide traffic coordination system
+🤝 Contribution
+
+Contributions are welcome. Open an issue to discuss major changes.
