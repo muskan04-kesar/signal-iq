@@ -238,7 +238,7 @@ const EmergencyView: React.FC<EmergencyViewProps> = ({
                 zoomControl={false}
               >
                 <TileLayer
-                    url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                    url={`https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${import.meta.env.VITE_CARTO_API_KEY || 'cb1_4h4f_1_245ce1c69da66ad805a6fd13'}`}
                 />
 
                 {/* Draw Computed Route (Preview) */}
