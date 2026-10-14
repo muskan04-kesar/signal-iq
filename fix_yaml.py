@@ -1,16 +1,28 @@
-import yaml
+"""
+Utility to verify and update bdd100k.yaml paths for YOLOv5.
+"""
+
 import os
+import yaml
 
-yaml_path = r"C:\Users\H P\.cache\kagglehub\datasets\ikramali585\emergency-vs-non-emergency-vehicles\versions\1\data.yaml"
-base_dir = r"C:/Users/H P/.cache/kagglehub/datasets/ikramali585/emergency-vs-non-emergency-vehicles/versions/1"
+workspace_dir = os.path.dirname(os.path.abspath(__file__))
+dataset_dir = os.path.join(workspace_dir, "dataset_bdd100k")
+yaml_path = os.path.join(dataset_dir, "bdd100k.yaml")
 
-with open(yaml_path, 'r') as f:
+if not os.path.exists(yaml_path):
+    print(f"Warning: {yaml_path} not found. Please run download_dataset.py first.")
+    exit(1)
+
+with open(yaml_path, 'r', encoding='utf-8') as f:
     data = yaml.safe_load(f)
 
-data['train'] = os.path.join(base_dir, 'train').replace('\\', '/')
-data['val'] = os.path.join(base_dir, 'val').replace('\\', '/')
+# Ensure absolute path with forward slashes for YOLOv5 compatibility
+data['path'] = os.path.abspath(dataset_dir).replace('\\', '/')
+data['train'] = 'images/train'
+data['val'] = 'images/val'
 
-with open(yaml_path, 'w') as f:
-    yaml.dump(data, f, default_flow_style=False)
+with open(yaml_path, 'w', encoding='utf-8') as f:
+    yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
-print("Updated data.yaml successfully.")
+print(f"Verified and updated {yaml_path} successfully.")
+print(f"Dataset root: {data['path']}")

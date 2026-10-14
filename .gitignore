@@ -6,4 +6,9 @@ venv/
 env/
 *.mp4
 *.avi
+# Datasets
+dataset_bdd100k/
+datasets/
+*.pt.cache
+
 # But we allow .pt (since best.pt is ~14MB)
